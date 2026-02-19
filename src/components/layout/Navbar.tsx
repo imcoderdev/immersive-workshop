@@ -50,6 +50,10 @@ export function Navbar() {
       <nav className="container flex h-16 items-center justify-between">
         <Link to="/" className="flex items-center gap-2 group">
           <img src={logoImg} alt="SmartWorkshop 360" className="h-9 w-auto" />
+          <span className="text-lg font-bold tracking-tight">
+            <span className="gradient-text">Smart</span>{" "}
+            <span className="text-foreground">Workshop</span>
+          </span>
         </Link>
 
         {/* Desktop */}
