@@ -1,19 +1,41 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Menu, X, Compass } from "lucide-react";
+import { Menu, X, Compass, LogOut, LayoutDashboard, User } from "lucide-react";
 import { useState } from "react";
+import { useAuthStore } from "@/stores/auth-store";
 
-const navLinks = [
+const publicLinks = [
   { label: "Features", href: "/#features" },
   { label: "How It Works", href: "/#how-it-works" },
   { label: "Explore Demo", href: "/workshop" },
 ];
 
+function getDashboardPath(role?: string) {
+  if (role === 'admin') return '/admin';
+  if (role === 'faculty') return '/faculty';
+  return '/dashboard';
+}
+
 export function Navbar() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, profile, signOut } = useAuthStore();
   const isImmersive = location.pathname.startsWith("/workshop");
+  const isAuthenticated = !!user;
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/');
+  };
+
+  const authLinks = isAuthenticated
+    ? [
+        { label: "Workshop", href: "/workshop" },
+        { label: "Dashboard", href: getDashboardPath(profile?.role) },
+      ]
+    : publicLinks;
 
   return (
     <header
@@ -37,7 +59,7 @@ export function Navbar() {
 
         {/* Desktop */}
         <div className="hidden md:flex items-center gap-1">
-          {navLinks.map((link) => (
+          {authLinks.map((link) => (
             <Link
               key={link.href}
               to={link.href}
@@ -49,12 +71,24 @@ export function Navbar() {
         </div>
 
         <div className="hidden md:flex items-center gap-3">
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/auth">Sign In</Link>
-          </Button>
-          <Button variant="hero" size="sm" asChild>
-            <Link to="/auth?tab=register">Get Started</Link>
-          </Button>
+          {isAuthenticated ? (
+            <>
+              <span className="text-xs text-muted-foreground capitalize">{profile?.role ?? 'user'}</span>
+              <span className="text-sm font-medium truncate max-w-[120px]">{profile?.full_name ?? user?.email}</span>
+              <Button variant="ghost" size="sm" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4 mr-1" />Sign Out
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/auth">Sign In</Link>
+              </Button>
+              <Button size="sm" asChild>
+                <Link to="/auth?tab=register">Get Started</Link>
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Mobile */}
@@ -70,7 +104,7 @@ export function Navbar() {
       {open && (
         <div className="md:hidden glass-panel-strong border-t border-border/30 fade-in">
           <div className="container py-4 flex flex-col gap-2">
-            {navLinks.map((link) => (
+            {authLinks.map((link) => (
               <Link
                 key={link.href}
                 to={link.href}
@@ -81,12 +115,20 @@ export function Navbar() {
               </Link>
             ))}
             <div className="flex gap-2 pt-2">
-              <Button variant="ghost" size="sm" className="flex-1" asChild>
-                <Link to="/auth" onClick={() => setOpen(false)}>Sign In</Link>
-              </Button>
-              <Button variant="hero" size="sm" className="flex-1" asChild>
-                <Link to="/auth?tab=register" onClick={() => setOpen(false)}>Get Started</Link>
-              </Button>
+              {isAuthenticated ? (
+                <Button variant="ghost" size="sm" className="flex-1" onClick={() => { setOpen(false); handleSignOut(); }}>
+                  <LogOut className="h-4 w-4 mr-1" />Sign Out
+                </Button>
+              ) : (
+                <>
+                  <Button variant="ghost" size="sm" className="flex-1" asChild>
+                    <Link to="/auth" onClick={() => setOpen(false)}>Sign In</Link>
+                  </Button>
+                  <Button size="sm" className="flex-1" asChild>
+                    <Link to="/auth?tab=register" onClick={() => setOpen(false)}>Get Started</Link>
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
