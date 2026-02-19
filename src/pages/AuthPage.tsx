@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Compass, Mail, Lock, User, AlertCircle, GraduationCap, BookOpen, Shield } from 'lucide-react';
+import { Mail, Lock, User, AlertCircle, GraduationCap, BookOpen, Shield } from 'lucide-react';
+import logoImg from '@/assets/logo.png';
 import { signInWithEmail, signUpWithEmail, signInWithGoogle, resetPassword } from '@/services/auth-service';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
@@ -126,11 +127,8 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        <div className="flex items-center justify-center gap-3 mb-8">
-          <div className="p-2 rounded-xl bg-primary/10 border border-primary/20">
-            <Compass className="h-8 w-8 text-primary" />
-          </div>
-          <span className="text-xl font-bold gradient-text">Digital Smart Workshop</span>
+        <div className="flex items-center justify-center mb-8">
+          <img src={logoImg} alt="SmartWorkshop 360" className="h-12 w-auto" />
         </div>
 
         {searchParams.get('error') && (

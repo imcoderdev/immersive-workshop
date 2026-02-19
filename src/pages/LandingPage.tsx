@@ -172,7 +172,7 @@ export default function LandingPage() {
             <div className="relative">
               <h2 className="text-3xl md:text-4xl font-bold mb-4">Ready to Transform Your Workshop?</h2>
               <p className="text-muted-foreground max-w-lg mx-auto mb-8">
-                Join colleges already using Digital Smart Workshop for safer, smarter machine access.
+                Join institutions already using SmartWorkshop 360 for safer, smarter machine access.
               </p>
               <Button variant="hero" size="xl" asChild>
                 <Link to="/auth?tab=register">

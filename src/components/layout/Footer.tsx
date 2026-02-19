@@ -1,5 +1,5 @@
-import { Compass } from "lucide-react";
 import { Link } from "react-router-dom";
+import logoImg from "@/assets/logo.png";
 
 export function Footer() {
   return (
@@ -8,10 +8,7 @@ export function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
           <div className="md:col-span-2">
             <Link to="/" className="flex items-center gap-2 mb-4">
-              <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                <Compass className="h-4 w-4 text-primary-foreground" />
-              </div>
-              <span className="text-base font-bold">Digital Smart Workshop</span>
+              <img src={logoImg} alt="SmartWorkshop 360" className="h-8 w-auto" />
             </Link>
             <p className="text-sm text-muted-foreground max-w-sm">
               Immersive 360° digital twin platform for college workshops. Explore machines, stay safe, and book with confidence.
@@ -35,7 +32,7 @@ export function Footer() {
           </div>
         </div>
         <div className="mt-8 pt-8 border-t border-border/30 text-center text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Digital Smart Workshop. All rights reserved.
+          © {new Date().getFullYear()} SmartWorkshop 360. All rights reserved.
         </div>
       </div>
     </footer>

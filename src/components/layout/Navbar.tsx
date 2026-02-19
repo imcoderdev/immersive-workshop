@@ -1,9 +1,10 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Menu, X, Compass, LogOut, LayoutDashboard, User } from "lucide-react";
+import { Menu, X, LogOut, LayoutDashboard, User } from "lucide-react";
 import { useState } from "react";
 import { useAuthStore } from "@/stores/auth-store";
+import logoImg from "@/assets/logo.png";
 
 const publicLinks = [
   { label: "Features", href: "/#features" },
@@ -48,13 +49,7 @@ export function Navbar() {
     >
       <nav className="container flex h-16 items-center justify-between">
         <Link to="/" className="flex items-center gap-2 group">
-          <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center glow-primary">
-            <Compass className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <span className="text-lg font-bold tracking-tight">
-            <span className="gradient-text">Digital Smart</span>{" "}
-            <span className="text-foreground">Workshop</span>
-          </span>
+          <img src={logoImg} alt="SmartWorkshop 360" className="h-9 w-auto" />
         </Link>
 
         {/* Desktop */}

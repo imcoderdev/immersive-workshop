@@ -1,73 +1,67 @@
-# Welcome to your Lovable project
+# SmartWorkshop 360
 
-## Project info
+An immersive 360° digital-twin platform for college workshops. Students, faculty and administrators can explore panoramic workshop environments, view machine details through interactive hotspots, complete safety protocols, and book equipment — all from a browser.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Features
 
-## How can I edit this code?
+- **360° Panorama Viewer** — Pannellum-powered equirectangular scenes with interactive hotspots (info, warning, machine)
+- **Role-Based Auth** — Student (auto-approved), Faculty & Admin (require admin approval) via Supabase Auth
+- **Machine Booking** — Students book time-slots; faculty approve / reject
+- **Faculty Dashboard** — Manage bookings, add / edit / delete machines
+- **Admin Dashboard** — Approve teachers, view analytics (weekly usage, machine utilisation), CSV export
+- **Safety Acknowledgements** — Students must acknowledge safety info before booking
 
-There are several ways of editing your application.
+## Tech Stack
 
-**Use Lovable**
+| Layer | Technology |
+|-------|-----------|
+| UI | React 18 · TypeScript · Tailwind CSS · ShadCN UI |
+| Build | Vite + SWC |
+| State | Zustand · TanStack React Query |
+| Forms | React Hook Form · Zod |
+| 360° | Pannellum 2.5 |
+| Backend | Supabase (Postgres, Auth, RLS, Edge Functions) |
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## Getting Started
 
-Changes made via Lovable will be committed automatically to this repo.
+```bash
+# 1. Clone
+git clone https://github.com/imcoderdev/immersive-workshop.git
+cd immersive-workshop
 
-**Use your preferred IDE**
+# 2. Install
+npm install   # or bun install
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+# 3. Configure
+cp .env.example .env   # fill in Supabase URL & anon key
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+# 4. Run
+npm run dev             # opens on http://localhost:8080
 ```
 
-**Edit a file directly in GitHub**
+## Scripts
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start dev server (port 8080) |
+| `npm run build` | Production build |
+| `npm run preview` | Preview production build |
+| `npm run lint` | ESLint check |
+| `npm run test` | Run tests (Vitest) |
 
-**Use GitHub Codespaces**
+## Project Structure
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```
+src/
+├── components/       # UI components (layout, viewer, ui)
+├── hooks/            # Custom React hooks
+├── lib/              # Utilities, Supabase client
+├── pages/            # Route pages
+├── services/         # Supabase service layer
+├── stores/           # Zustand stores
+└── types/            # TypeScript interfaces
+```
 
-## What technologies are used for this project?
+## License
 
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+MIT
