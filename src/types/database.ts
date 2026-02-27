@@ -250,3 +250,20 @@ export const RAW_MATERIAL_LABELS: Record<RawMaterialSource, string> = {
   workshop_provided: 'Workshop Provided',
   self_purchased: 'Self Purchased',
 };
+
+/** Predefined machine catalog — faculty picks from these when adding a machine */
+export const MACHINE_CATALOG = [
+  'CNC',
+  'VMC',
+  '3D Printer Small',
+  '3D Printer Big (JAK)',
+  'CO2 Laser Cutting Machine',
+  'Plasma Machine',
+  'CNC Wood Router',
+  'TIG Welding Machine',
+  'MIG Welding Machine',
+  'Band Saw Machine',
+  'New 3D Printer at Asst. W/S Cabin',
+] as const;
+
+export type CatalogMachineName = (typeof MACHINE_CATALOG)[number];

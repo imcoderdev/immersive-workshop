@@ -77,7 +77,7 @@ const App = () => (
               }
             />
             <Route
-              path="/utilize/:machine_id"
+              path="/utilize/:machine_id?"
               element={
                 <ProtectedRoute>
                   <UtilizationForm />

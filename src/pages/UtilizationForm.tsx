@@ -36,14 +36,14 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
-import { getMachineById } from '@/services/workshop-service';
+import { getMachineById, getAllMachines } from '@/services/workshop-service';
 import {
   createUtilizationRequest,
   checkRecentSafetyAcknowledgement,
 } from '@/services/utilization-service';
 import { acknowledgeSafety } from '@/services/booking-service';
 import type { WorkType, RawMaterialSource } from '@/types/database';
-import { WORK_TYPE_LABELS, RAW_MATERIAL_LABELS } from '@/types/database';
+import { WORK_TYPE_LABELS, RAW_MATERIAL_LABELS, MACHINE_CATALOG } from '@/types/database';
 
 // ─── Zod Schema ───────────────────────────────────────────────────────────────
 
@@ -98,27 +98,46 @@ function formatDuration(mins: number): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function UtilizationForm() {
-  const { machine_id } = useParams<{ machine_id: string }>();
+  const { machine_id: urlMachineId } = useParams<{ machine_id: string }>();
   const navigate = useNavigate();
   const { profile } = useAuthStore();
   const { toast } = useToast();
+
+  // Machine selection state (when no URL param)
+  const [selectedMachineId, setSelectedMachineId] = useState<string>(urlMachineId ?? '');
+  const activeMachineId = urlMachineId || selectedMachineId || undefined;
 
   // SOP interaction tracking
   const sopContainerRef = useRef<HTMLDivElement>(null);
   const [sopScrolled, setSopScrolled] = useState(false);
   const [safetyCheckboxEnabled, setSafetyCheckboxEnabled] = useState(false);
 
+  // Fetch all machines for the picker (only when no URL param)
+  const { data: allMachines = [] } = useQuery({
+    queryKey: ['all-machines'],
+    queryFn: getAllMachines,
+    enabled: !urlMachineId,
+  });
+
+  // Group machines by catalog name for display
+  const catalogMachines = allMachines.filter((m) =>
+    (MACHINE_CATALOG as readonly string[]).includes(m.name)
+  );
+  const otherMachines = allMachines.filter(
+    (m) => !(MACHINE_CATALOG as readonly string[]).includes(m.name)
+  );
+
   // Queries
   const { data: machine, isLoading: machineLoading } = useQuery({
-    queryKey: ['machine', machine_id],
-    queryFn: () => getMachineById(machine_id!),
-    enabled: !!machine_id,
+    queryKey: ['machine', activeMachineId],
+    queryFn: () => getMachineById(activeMachineId!),
+    enabled: !!activeMachineId,
   });
 
   const { data: recentSafety } = useQuery({
-    queryKey: ['recent-safety', machine_id],
-    queryFn: () => checkRecentSafetyAcknowledgement(machine_id!),
-    enabled: !!machine_id,
+    queryKey: ['recent-safety', activeMachineId],
+    queryFn: () => checkRecentSafetyAcknowledgement(activeMachineId!),
+    enabled: !!activeMachineId,
   });
 
   // If user already acknowledged within 30 days, enable checkbox immediately
@@ -168,13 +187,15 @@ export default function UtilizationForm() {
   // Submission
   const submitMutation = useMutation({
     mutationFn: async (values: FormValues) => {
+      if (!activeMachineId) throw new Error('Please select a machine');
+
       // Record safety acknowledgement if not recently done
-      if (!recentSafety && machine_id) {
-        await acknowledgeSafety(machine_id);
+      if (!recentSafety) {
+        await acknowledgeSafety(activeMachineId);
       }
 
       return createUtilizationRequest({
-        machine_id: machine_id!,
+        machine_id: activeMachineId,
         work_type: values.work_type,
         work_description: values.work_description,
         raw_material_source: values.raw_material_source,
@@ -197,7 +218,7 @@ export default function UtilizationForm() {
 
   // ─── Guards ──────────────────────────────────────────────────────────────────
 
-  if (machineLoading) {
+  if (urlMachineId && machineLoading) {
     return (
       <div className="min-h-screen pt-20 flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -205,7 +226,7 @@ export default function UtilizationForm() {
     );
   }
 
-  if (!machine) {
+  if (urlMachineId && !machine) {
     return (
       <div className="min-h-screen pt-20 flex flex-col items-center justify-center gap-4">
         <AlertTriangle className="h-12 w-12 text-destructive" />
@@ -248,24 +269,67 @@ export default function UtilizationForm() {
           </p>
         </div>
 
-        {/* Machine Info (read-only) */}
+        {/* Machine Selection / Info */}
         <section className="glass-panel rounded-xl p-5 mb-6">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-              <Cpu className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold">{machine.name}</h2>
-              {machine.shop_type && (
-                <p className="text-xs text-muted-foreground">{machine.shop_type}</p>
+          {!urlMachineId ? (
+            <>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Cpu className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold">Select Machine *</h2>
+                  <p className="text-xs text-muted-foreground">Choose the machine you want to use</p>
+                </div>
+              </div>
+              <Select value={selectedMachineId} onValueChange={(v) => { setSelectedMachineId(v); setSopScrolled(false); setSafetyCheckboxEnabled(false); }}>
+                <SelectTrigger aria-label="Select machine">
+                  <SelectValue placeholder="Pick a machine" />
+                </SelectTrigger>
+                <SelectContent className="z-[70]">
+                  {catalogMachines.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                  ))}
+                  {otherMachines.length > 0 && catalogMachines.length > 0 && (
+                    <SelectItem disabled value="__sep__" className="text-xs text-muted-foreground">── Other machines ──</SelectItem>
+                  )}
+                  {otherMachines.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {machine && (
+                <div className="mt-3 p-3 rounded-lg bg-muted/20 border border-border/20">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{machine.name}</span>
+                    <Badge variant="outline" className="text-xs">{machine.status}</Badge>
+                  </div>
+                  {machine.description && (
+                    <p className="text-xs text-muted-foreground mt-1">{machine.description}</p>
+                  )}
+                </div>
               )}
-            </div>
-            <Badge variant="outline" className="ml-auto text-xs">
-              {machine.status}
-            </Badge>
-          </div>
-          {machine.description && (
-            <p className="text-sm text-muted-foreground">{machine.description}</p>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 mb-3">
+                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <Cpu className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold">{machine!.name}</h2>
+                  {machine!.shop_type && (
+                    <p className="text-xs text-muted-foreground">{machine!.shop_type}</p>
+                  )}
+                </div>
+                <Badge variant="outline" className="ml-auto text-xs">
+                  {machine!.status}
+                </Badge>
+              </div>
+              {machine!.description && (
+                <p className="text-sm text-muted-foreground">{machine!.description}</p>
+              )}
+            </>
           )}
         </section>
 
@@ -460,7 +524,7 @@ export default function UtilizationForm() {
             ) : (
               <>
                 {/* SOP container — user must scroll through */}
-                {machine.sop_pdf_url ? (
+                {machine?.sop_pdf_url ? (
                   <div className="mb-4">
                     <p className="text-xs text-muted-foreground mb-2">
                       Please review the Standard Operating Procedure below. Scroll to the bottom to enable the safety checkbox.
@@ -471,7 +535,7 @@ export default function UtilizationForm() {
                       className="h-52 overflow-y-auto rounded-lg border border-white/10 bg-muted/20 p-1"
                     >
                       <iframe
-                        src={machine.sop_pdf_url}
+                        src={machine!.sop_pdf_url!}
                         title="SOP Document"
                         className="w-full h-[600px] rounded"
                       />
@@ -582,7 +646,7 @@ export default function UtilizationForm() {
           <div className="fixed bottom-0 left-0 right-0 z-30 glass-panel-strong border-t border-white/10 p-4 md:static md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
             <div className="container max-w-2xl flex items-center justify-between gap-4">
               <div className="hidden md:block text-xs text-muted-foreground">
-                {duration
+                {duration && machine
                   ? `${formatDuration(duration)} on ${machine.name}`
                   : 'Complete all fields to submit'}
               </div>
@@ -590,7 +654,7 @@ export default function UtilizationForm() {
                 type="submit"
                 size="lg"
                 className="w-full md:w-auto"
-                disabled={submitMutation.isPending}
+                disabled={submitMutation.isPending || !activeMachineId}
               >
                 {submitMutation.isPending ? (
                   <>

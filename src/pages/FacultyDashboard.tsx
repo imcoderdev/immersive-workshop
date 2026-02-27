@@ -25,6 +25,7 @@ import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import type { BookingDetail, Machine, MachineStatus } from '@/types/database';
+import { MACHINE_CATALOG } from '@/types/database';
 
 type TabId = 'bookings' | 'machines';
 
@@ -56,6 +57,8 @@ export default function FacultyDashboard() {
   const [showMachineForm, setShowMachineForm] = useState(false);
   const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
   const [machineForm, setMachineForm] = useState<MachineFormData>(DEFAULT_MACHINE);
+  const [selectedCatalog, setSelectedCatalog] = useState<string>('');
+  const [customMachineName, setCustomMachineName] = useState('');
 
   // --- Data queries ---
   const { data: allBookings = [] } = useQuery({
@@ -148,11 +151,16 @@ export default function FacultyDashboard() {
   const openAddMachine = () => {
     setEditingMachine(null);
     setMachineForm(DEFAULT_MACHINE);
+    setSelectedCatalog('');
+    setCustomMachineName('');
     setShowMachineForm(true);
   };
 
   const openEditMachine = (m: Machine) => {
     setEditingMachine(m);
+    const isCatalog = (MACHINE_CATALOG as readonly string[]).includes(m.name);
+    setSelectedCatalog(isCatalog ? m.name : '__other__');
+    setCustomMachineName(isCatalog ? '' : m.name);
     setMachineForm({
       name: m.name,
       description: m.description || '',
@@ -167,18 +175,22 @@ export default function FacultyDashboard() {
     setShowMachineForm(false);
     setEditingMachine(null);
     setMachineForm(DEFAULT_MACHINE);
+    setSelectedCatalog('');
+    setCustomMachineName('');
   };
 
   const handleSaveMachine = () => {
-    if (!machineForm.name.trim()) {
-      toast({ title: 'Name required', variant: 'destructive' });
+    const resolvedName = selectedCatalog === '__other__' ? customMachineName.trim() : selectedCatalog;
+    if (!resolvedName) {
+      toast({ title: 'Machine name required', variant: 'destructive' });
       return;
     }
+    const finalForm = { ...machineForm, name: resolvedName };
     if (editingMachine) {
-      updateMachineMutation.mutate({ id: editingMachine.id, data: machineForm });
+      updateMachineMutation.mutate({ id: editingMachine.id, data: finalForm });
     } else {
       createMachineMutation.mutate({
-        ...machineForm,
+        ...finalForm,
         workshop_id: workshopId,
         added_by: profile?.id,
         technical_specs: {},
@@ -331,11 +343,23 @@ export default function FacultyDashboard() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Machine Name *</Label>
-                    <Input
-                      value={machineForm.name}
-                      onChange={(e) => setMachineForm((f) => ({ ...f, name: e.target.value }))}
-                      placeholder="e.g. CNC Milling Machine"
-                    />
+                    <Select value={selectedCatalog} onValueChange={(v) => { setSelectedCatalog(v); if (v !== '__other__') { setCustomMachineName(''); setMachineForm((f) => ({ ...f, name: v })); } else { setMachineForm((f) => ({ ...f, name: '' })); } }}>
+                      <SelectTrigger><SelectValue placeholder="Select machine" /></SelectTrigger>
+                      <SelectContent className="z-[70]">
+                        {MACHINE_CATALOG.map((name) => (
+                          <SelectItem key={name} value={name}>{name}</SelectItem>
+                        ))}
+                        <SelectItem value="__other__">Other (custom name)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {selectedCatalog === '__other__' && (
+                      <Input
+                        value={customMachineName}
+                        onChange={(e) => { setCustomMachineName(e.target.value); setMachineForm((f) => ({ ...f, name: e.target.value })); }}
+                        placeholder="Enter custom machine name"
+                        className="mt-2"
+                      />
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Status</Label>

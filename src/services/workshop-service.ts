@@ -96,6 +96,16 @@ export async function deletePanorama(id: string): Promise<void> {
 
 // ─── Machines ─────────────────────────────────────────────────────────────────
 
+export async function getAllMachines(): Promise<Machine[]> {
+  const { data, error } = await supabase
+    .from('machines')
+    .select('*')
+    .order('name');
+
+  if (error) throw error;
+  return data as Machine[];
+}
+
 export async function getMachinesByWorkshop(workshopId: string): Promise<Machine[]> {
   const { data, error } = await supabase
     .from('machines')

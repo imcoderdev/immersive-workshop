@@ -96,7 +96,7 @@ export default function StudentDashboard() {
 
         <div className="flex flex-wrap gap-3 mb-8">
           <Button size="sm" asChild><Link to="/workshop"><Compass className="h-4 w-4 mr-1" />Explore Workshop</Link></Button>
-          <Button variant="outline" size="sm" asChild><Link to="/workshop"><Wrench className="h-4 w-4 mr-1" />New Utilization Request</Link></Button>
+          <Button variant="outline" size="sm" asChild><Link to="/utilize"><Wrench className="h-4 w-4 mr-1" />New Utilization Request</Link></Button>
           <Button variant="outline" size="sm"><Settings className="h-4 w-4 mr-1" />Account Settings</Button>
         </div>
 
@@ -177,7 +177,7 @@ export default function StudentDashboard() {
 
           {utilizationRequests.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
-              No utilization requests yet. Go to a machine in the workshop to submit one.
+              No utilization requests yet. Submit one from the button above or from a machine in the workshop.
             </p>
           ) : (
             <div className="space-y-3">
