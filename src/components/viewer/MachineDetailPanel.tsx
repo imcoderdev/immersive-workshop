@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Play, FileText, Shield, Calendar, Clock, CheckCircle, AlertTriangle, Info } from 'lucide-react';
+import { X, Play, FileText, Shield, Calendar, Clock, CheckCircle, AlertTriangle, Info, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -9,6 +9,7 @@ import { useWorkshopStore } from '@/stores/workshop-store';
 import { checkSafetyAcknowledgement, acknowledgeSafety } from '@/services/booking-service';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigate } from 'react-router-dom';
 import type { Machine, MachineStatus } from '@/types/database';
 import BookingModal from '@/components/viewer/BookingModal';
 
@@ -23,6 +24,7 @@ export function MachineDetailPanel() {
   const { selectedHotspot, isDetailPanelOpen, closeDetailPanel } = useWorkshopStore();
   const { user } = useAuthStore();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const machine = selectedHotspot?.machine;
 
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
@@ -233,6 +235,21 @@ export function MachineDetailPanel() {
                       Book This Machine
                     </Button>
                   )}
+
+                  {/* Utilize Machine button */}
+                  <Button
+                    onClick={() => {
+                      closeDetailPanel();
+                      navigate(`/utilize/${machine.id}`);
+                    }}
+                    className="w-full"
+                    size="lg"
+                    variant="outline"
+                    disabled={machine.status === 'maintenance'}
+                  >
+                    <Wrench className="h-4 w-4 mr-2" />
+                    Utilize Machine
+                  </Button>
                 </>
               )}
 

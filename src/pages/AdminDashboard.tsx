@@ -1,6 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Users,
   Cpu,
@@ -13,15 +21,23 @@ import {
   Clock,
   UserCheck,
   BookOpen,
+  Wrench,
+  Filter,
 } from 'lucide-react';
 import { getAdminStats, getWeeklyUsage, getMachineUtilization } from '@/services/booking-service';
 import { getAllProfiles, getPendingTeachers, approveTeacher, rejectTeacher } from '@/services/auth-service';
+import { getAllUtilizationRequests } from '@/services/utilization-service';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
+import { useState } from 'react';
+import type { UtilizationStatus } from '@/types/database';
+import { utilizationStatusColor, WORK_TYPE_LABELS, RAW_MATERIAL_LABELS } from '@/types/database';
 
 export default function AdminDashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [utilFilterStatus, setUtilFilterStatus] = useState<string>('all');
+  const [utilFilterDate, setUtilFilterDate] = useState('');
 
   const { data: stats } = useQuery({
     queryKey: ['admin-stats'],
@@ -47,6 +63,16 @@ export default function AdminDashboard() {
     queryKey: ['pending-teachers'],
     queryFn: getPendingTeachers,
   });
+
+  const { data: allUtilRequests = [] } = useQuery({
+    queryKey: ['admin-utilization'],
+    queryFn: () => getAllUtilizationRequests(),
+  });
+
+  // Filtered utilization requests
+  const filteredUtil = allUtilRequests
+    .filter((r) => utilFilterStatus === 'all' || r.status === utilFilterStatus)
+    .filter((r) => !utilFilterDate || r.date === utilFilterDate);
 
   const approveM = useMutation({
     mutationFn: approveTeacher,
@@ -85,6 +111,23 @@ export default function AdminDashboard() {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'machine_utilization.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportUtilCSV = () => {
+    if (!filteredUtil.length) return;
+    const header = 'Student,Email,Department,Machine,Work Type,Material,Date,Start,End,Duration (min),Status,Rejection Reason\n';
+    const rows = filteredUtil
+      .map((r) =>
+        `"${r.user_name}","${r.user_email}","${r.user_department ?? ''}","${r.machine_name}","${WORK_TYPE_LABELS[r.work_type] ?? r.work_type}","${RAW_MATERIAL_LABELS[r.raw_material_source] ?? r.raw_material_source}","${r.date}","${r.start_time}","${r.end_time}",${r.duration_minutes},"${r.status}","${r.rejection_reason ?? ''}"`,
+      )
+      .join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'utilization_requests.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -222,6 +265,81 @@ export default function AdminDashboard() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Utilization Requests Section */}
+        <div className="glass-panel rounded-xl p-6 mt-6">
+          <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+            <div className="flex items-center gap-2">
+              <Wrench className="h-5 w-5 text-primary" />
+              <h2 className="text-base font-semibold">Utilization Requests ({filteredUtil.length})</h2>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={utilFilterStatus} onValueChange={setUtilFilterStatus}>
+                <SelectTrigger className="w-36 h-8 text-xs" aria-label="Filter by status">
+                  <Filter className="h-3 w-3 mr-1" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="z-[70]">
+                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                  <SelectItem value="completed">Completed</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                type="date"
+                value={utilFilterDate}
+                onChange={(e) => setUtilFilterDate(e.target.value)}
+                className="w-40 h-8 text-xs"
+                aria-label="Filter by date"
+              />
+              <Button variant="outline" size="sm" onClick={exportUtilCSV}>
+                <Download className="h-3.5 w-3.5 mr-1" />CSV
+              </Button>
+            </div>
+          </div>
+
+          {filteredUtil.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">No utilization requests found.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border/30">
+                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Student</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Machine</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Work Type</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Date</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Time</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Duration</th>
+                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredUtil.slice(0, 50).map((r) => (
+                    <tr key={r.id} className="border-b border-border/10 hover:bg-muted/10">
+                      <td className="py-2.5 px-3">
+                        <div className="font-medium text-xs">{r.user_name}</div>
+                        <div className="text-xs text-muted-foreground">{r.user_department ?? ''}</div>
+                      </td>
+                      <td className="py-2.5 px-3 text-xs">{r.machine_name}</td>
+                      <td className="py-2.5 px-3 text-xs">{WORK_TYPE_LABELS[r.work_type] ?? r.work_type}</td>
+                      <td className="py-2.5 px-3 text-xs">{format(new Date(r.date), 'MMM d')}</td>
+                      <td className="py-2.5 px-3 text-xs">{r.start_time.slice(0, 5)} – {r.end_time.slice(0, 5)}</td>
+                      <td className="py-2.5 px-3 text-xs">{r.duration_minutes} min</td>
+                      <td className="py-2.5 px-3">
+                        <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', utilizationStatusColor(r.status))}>
+                          {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

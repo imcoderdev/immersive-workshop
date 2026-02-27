@@ -3,6 +3,9 @@ export type UserRole = 'student' | 'faculty' | 'workshop_supervisor' | 'admin' |
 export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'completed' | 'cancelled';
 export type MachineStatus = 'available' | 'reserved' | 'busy' | 'maintenance';
 export type HotspotType = 'machine_info' | 'safety' | 'booking' | 'navigation';
+export type WorkType = 'team_project' | 'final_year_project' | 'academic_event' | 'other';
+export type RawMaterialSource = 'workshop_provided' | 'self_purchased';
+export type UtilizationStatus = 'pending' | 'approved' | 'rejected' | 'completed';
 
 /** Simplified hotspot category for CSS/UI usage */
 export function hotspotCssType(type: HotspotType): string {
@@ -69,6 +72,9 @@ export interface Machine {
   is_bookable: boolean;
   max_booking_hours: number;
   added_by: string | null;
+  supervisor_id: string | null;
+  department: string | null;
+  shop_type: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -180,3 +186,67 @@ export function statusColor(status: BookingStatus): string {
     default: return 'bg-muted text-muted-foreground';
   }
 }
+
+// ─── Utilization Request Types ────────────────────────────────────────────────
+
+export interface UtilizationRequest {
+  id: string;
+  user_id: string;
+  machine_id: string;
+  supervisor_id: string | null;
+  work_type: WorkType;
+  work_description: string | null;
+  raw_material_source: RawMaterialSource;
+  date: string;
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  safety_acknowledged: boolean;
+  status: UtilizationStatus;
+  rejection_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UtilizationRequestDetail extends UtilizationRequest {
+  user_name: string;
+  user_email: string;
+  user_department: string | null;
+  user_phone: string | null;
+  machine_name: string;
+  machine_shop_type: string | null;
+  machine_department: string | null;
+  supervisor_name: string | null;
+  supervisor_email: string | null;
+}
+
+export interface SupervisorUtilizationStats {
+  total_requests: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  completed: number;
+}
+
+/** Utilization status → badge colour */
+export function utilizationStatusColor(status: UtilizationStatus): string {
+  switch (status) {
+    case 'pending': return 'bg-warning/15 text-warning';
+    case 'approved': return 'bg-success/15 text-success';
+    case 'rejected': return 'bg-destructive/15 text-destructive';
+    case 'completed': return 'bg-primary/15 text-primary';
+    default: return 'bg-muted text-muted-foreground';
+  }
+}
+
+export const WORK_TYPE_LABELS: Record<WorkType, string> = {
+  team_project: 'Team Project',
+  final_year_project: 'Final Year Project',
+  academic_event: 'Academic Event',
+  other: 'Other',
+};
+
+export const RAW_MATERIAL_LABELS: Record<RawMaterialSource, string> = {
+  workshop_provided: 'Workshop Provided',
+  self_purchased: 'Self Purchased',
+};

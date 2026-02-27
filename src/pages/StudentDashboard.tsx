@@ -12,13 +12,17 @@ import {
   Settings,
   Compass,
   XCircle,
+  Cpu,
+  Wrench,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { getUserBookings, getUserSafetyAcknowledgements, cancelBooking } from '@/services/booking-service';
+import { getUserUtilizationRequests } from '@/services/utilization-service';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import type { BookingDetail, BookingStatus } from '@/types/database';
+import type { BookingDetail, BookingStatus, UtilizationRequestDetail, UtilizationStatus } from '@/types/database';
+import { WORK_TYPE_LABELS, utilizationStatusColor } from '@/types/database';
 
 const statusStyles: Record<BookingStatus, string> = {
   pending: 'bg-warning/15 text-warning',
@@ -56,6 +60,11 @@ export default function StudentDashboard() {
     queryFn: getUserSafetyAcknowledgements,
   });
 
+  const { data: utilizationRequests = [] } = useQuery({
+    queryKey: ['user-utilization'],
+    queryFn: getUserUtilizationRequests,
+  });
+
   const activeBookings = bookings.filter((b) => b.status === 'approved' || b.status === 'pending');
   const completedBookings = bookings.filter((b) => b.status === 'completed');
   const upcomingBookings = bookings.filter((b) => ['pending', 'approved'].includes(b.status) && new Date(b.date) >= new Date()).slice(0, 5);
@@ -87,13 +96,13 @@ export default function StudentDashboard() {
 
         <div className="flex flex-wrap gap-3 mb-8">
           <Button size="sm" asChild><Link to="/workshop"><Compass className="h-4 w-4 mr-1" />Explore Workshop</Link></Button>
-          <Button variant="outline" size="sm"><Calendar className="h-4 w-4 mr-1" />New Booking</Button>
+          <Button variant="outline" size="sm" asChild><Link to="/workshop"><Wrench className="h-4 w-4 mr-1" />New Utilization Request</Link></Button>
           <Button variant="outline" size="sm"><Settings className="h-4 w-4 mr-1" />Account Settings</Button>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard icon={Calendar} label="Active Bookings" value={activeBookings.length} />
-          <StatCard icon={CheckCircle2} label="Completed" value={completedBookings.length} />
+          <StatCard icon={Wrench} label="Utilization Requests" value={utilizationRequests.length} />
           <StatCard icon={Shield} label="Safety Cleared" value={safetyRecords.length} />
           <StatCard icon={BarChart3} label="Hours Logged" value={Math.round(totalHours)} />
         </div>
@@ -157,6 +166,51 @@ export default function StudentDashboard() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Utilization Requests */}
+        <div className="glass-panel rounded-xl p-6 mt-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-base font-semibold">Utilization Requests</h2>
+            <Wrench className="h-4 w-4 text-muted-foreground" />
+          </div>
+
+          {utilizationRequests.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              No utilization requests yet. Go to a machine in the workshop to submit one.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {utilizationRequests.slice(0, 10).map((req) => {
+                const utilStatusStyles: Record<UtilizationStatus, string> = {
+                  pending: 'bg-warning/15 text-warning',
+                  approved: 'bg-success/15 text-success',
+                  rejected: 'bg-destructive/15 text-destructive',
+                  completed: 'bg-primary/15 text-primary',
+                };
+                return (
+                  <div key={req.id} className="flex items-center gap-4 p-4 rounded-lg bg-muted/20 border border-border/30">
+                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <Cpu className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">{req.machine_name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {format(new Date(req.date), 'MMM d, yyyy')} &bull; {req.start_time.slice(0, 5)} - {req.end_time.slice(0, 5)} &bull; {WORK_TYPE_LABELS[req.work_type] ?? req.work_type}
+                      </div>
+                      {req.rejection_reason && (
+                        <div className="text-xs text-destructive mt-0.5">Reason: {req.rejection_reason}</div>
+                      )}
+                    </div>
+                    <span className={cn('inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium shrink-0', utilStatusStyles[req.status])}>
+                      {req.status === 'approved' ? <CheckCircle2 className="h-3 w-3" /> : req.status === 'rejected' ? <XCircle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                      {req.status.charAt(0).toUpperCase() + req.status.slice(1)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>

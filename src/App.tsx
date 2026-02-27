@@ -16,6 +16,8 @@ import WorkshopViewer from "./pages/WorkshopViewer";
 import StudentDashboard from "./pages/StudentDashboard";
 import FacultyDashboard from "./pages/FacultyDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import SupervisorDashboard from "./pages/SupervisorDashboard";
+import UtilizationForm from "./pages/UtilizationForm";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -63,6 +65,22 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/supervisor"
+              element={
+                <ProtectedRoute allowedRoles={['faculty', 'workshop_supervisor', 'admin']}>
+                  <SupervisorDashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/utilize/:machine_id"
+              element={
+                <ProtectedRoute>
+                  <UtilizationForm />
                 </ProtectedRoute>
               }
             />

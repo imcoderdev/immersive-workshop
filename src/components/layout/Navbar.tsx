@@ -31,10 +31,13 @@ export function Navbar() {
     navigate('/');
   };
 
+  const showSupervisor = isAuthenticated && ['faculty', 'workshop_supervisor', 'admin'].includes(profile?.role ?? '');
+
   const authLinks = isAuthenticated
     ? [
         { label: "Workshop", href: "/workshop" },
         { label: "Dashboard", href: getDashboardPath(profile?.role) },
+        ...(showSupervisor ? [{ label: "Supervisor", href: "/supervisor" }] : []),
       ]
     : publicLinks;
 
