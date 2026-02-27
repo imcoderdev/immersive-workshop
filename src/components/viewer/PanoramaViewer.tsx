@@ -42,6 +42,7 @@ export function PanoramaViewer({ imageUrl, hotspots, onHotspotClick }: PanoramaV
       orientationOnByDefault: false,
       crossOrigin: 'anonymous',
       hotSpotDebug: false,
+      hotSpots: [],
     });
 
     viewerRef.current.on('load', () => {

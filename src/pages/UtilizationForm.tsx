@@ -293,7 +293,7 @@ export default function UtilizationForm() {
                   name="work_type"
                   control={control}
                   render={({ field }) => (
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
                       <SelectTrigger id="work_type" className="mt-1.5" aria-label="Work type">
                         <SelectValue placeholder="Select work type" />
                       </SelectTrigger>
@@ -336,7 +336,7 @@ export default function UtilizationForm() {
                   name="raw_material_source"
                   control={control}
                   render={({ field }) => (
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
                       <SelectTrigger id="raw_material_source" className="mt-1.5" aria-label="Raw material source">
                         <SelectValue placeholder="Select material source" />
                       </SelectTrigger>
