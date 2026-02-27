@@ -88,7 +88,14 @@ export function useRealtimeInvalidation() {
         },
       )
 
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Realtime] Global channel subscribed');
+        }
+        if (err) {
+          console.error('[Realtime] Subscription error:', err);
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);

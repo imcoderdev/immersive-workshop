@@ -106,63 +106,54 @@ export default function UtilizationForm() {
   // Machine selection state — mirrors faculty catalog picker
   const [selectedCatalog, setSelectedCatalog] = useState<string>('');
   const [customMachineName, setCustomMachineName] = useState('');
-  const [resolvedMachineId, setResolvedMachineId] = useState<string | null>(null);
-  const [machineNotFound, setMachineNotFound] = useState(false);
-  const [resolving, setResolving] = useState(false);
-
-  const activeMachineId = urlMachineId || resolvedMachineId || undefined;
 
   // SOP interaction tracking
   const sopContainerRef = useRef<HTMLDivElement>(null);
   const [sopScrolled, setSopScrolled] = useState(false);
   const [safetyCheckboxEnabled, setSafetyCheckboxEnabled] = useState(false);
 
-  // Resolve catalog selection → DB machine by name
-  const resolveMachine = useCallback(async (name: string) => {
-    if (!name) {
-      setResolvedMachineId(null);
-      setMachineNotFound(false);
-      return;
-    }
-    setResolving(true);
-    setMachineNotFound(false);
-    try {
-      const found = await getMachineByName(name);
-      if (found) {
-        setResolvedMachineId(found.id);
-        setMachineNotFound(false);
-      } else {
-        setResolvedMachineId(null);
-        setMachineNotFound(true);
-      }
-    } catch {
-      setResolvedMachineId(null);
-      setMachineNotFound(true);
-    } finally {
-      setResolving(false);
-    }
-  }, []);
+  // Derive the name to look up — catalog name or custom name (on blur)
+  const [committedCustomName, setCommittedCustomName] = useState('');
+  const nameToResolve =
+    selectedCatalog === '__other__'
+      ? committedCustomName
+      : selectedCatalog || '';
 
-  // When catalog selection changes, resolve
+  // Resolve catalog / custom name → DB machine (useQuery = auto retry + cache)
+  const {
+    data: resolvedMachine,
+    isLoading: resolving,
+    isError: resolveError,
+  } = useQuery({
+    queryKey: ['machine-by-name', nameToResolve],
+    queryFn: () => getMachineByName(nameToResolve),
+    enabled: !!nameToResolve && !!profile,   // wait for auth
+    retry: 2,
+    staleTime: 30_000,
+  });
+
+  const resolvedMachineId = resolvedMachine?.id ?? null;
+  const machineNotFound = !resolving && !!nameToResolve && !resolvedMachine && !resolveError;
+
+  const activeMachineId = urlMachineId || resolvedMachineId || undefined;
+
+  // When catalog selection changes
   const handleCatalogChange = useCallback((value: string) => {
     setSelectedCatalog(value);
     setSopScrolled(false);
     setSafetyCheckboxEnabled(false);
     if (value !== '__other__') {
       setCustomMachineName('');
-      resolveMachine(value);
-    } else {
-      setResolvedMachineId(null);
-      setMachineNotFound(false);
+      setCommittedCustomName('');
     }
-  }, [resolveMachine]);
+  }, []);
 
-  // For "Other" custom name — resolve on blur
+  // For "Other" custom name — commit on blur so the query fires
   const handleCustomNameBlur = useCallback(() => {
-    if (selectedCatalog === '__other__' && customMachineName.trim()) {
-      resolveMachine(customMachineName.trim());
+    if (customMachineName.trim()) {
+      setCommittedCustomName(customMachineName.trim());
     }
-  }, [selectedCatalog, customMachineName, resolveMachine]);
+  }, [customMachineName]);
 
   // Queries
   const { data: machine, isLoading: machineLoading } = useQuery({

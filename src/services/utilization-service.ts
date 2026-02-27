@@ -158,9 +158,10 @@ export async function approveUtilizationRequest(
     .update({ status: 'approved' as UtilizationStatus })
     .eq('id', requestId)
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
+  if (!data) throw new Error('Unable to approve — you may not have permission for this request.');
   return data as UtilizationRequest;
 }
 
@@ -176,9 +177,10 @@ export async function rejectUtilizationRequest(
     })
     .eq('id', requestId)
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
+  if (!data) throw new Error('Unable to reject — you may not have permission for this request.');
   return data as UtilizationRequest;
 }
 
@@ -190,9 +192,10 @@ export async function completeUtilizationRequest(
     .update({ status: 'completed' as UtilizationStatus })
     .eq('id', requestId)
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) throw error;
+  if (!data) throw new Error('Unable to complete — you may not have permission for this request.');
   return data as UtilizationRequest;
 }
 

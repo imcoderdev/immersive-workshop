@@ -135,10 +135,8 @@ export default function SupervisorDashboard() {
   });
 
   const handleReject = (id: string) => {
-    if (rejectId === id && rejectReason.trim()) {
+    if (rejectReason.trim()) {
       rejectMut.mutate({ id, reason: rejectReason });
-    } else {
-      setRejectId(id);
     }
   };
 
@@ -262,7 +260,7 @@ export default function SupervisorDashboard() {
                 key={req.id}
                 request={req}
                 onApprove={() => approveMut.mutate(req.id)}
-                onReject={() => handleReject(req.id)}
+                onConfirmReject={() => handleReject(req.id)}
                 onComplete={() => completeMut.mutate(req.id)}
                 isApprovePending={approveMut.isPending}
                 isRejectPending={rejectMut.isPending}
@@ -270,6 +268,7 @@ export default function SupervisorDashboard() {
                 rejectId={rejectId}
                 rejectReason={rejectReason}
                 setRejectReason={setRejectReason}
+                setRejectId={setRejectId}
               />
             ))}
           </div>
@@ -284,7 +283,7 @@ export default function SupervisorDashboard() {
 function RequestCard({
   request: r,
   onApprove,
-  onReject,
+  onConfirmReject,
   onComplete,
   isApprovePending,
   isRejectPending,
@@ -292,10 +291,11 @@ function RequestCard({
   rejectId,
   rejectReason,
   setRejectReason,
+  setRejectId,
 }: {
   request: UtilizationRequestDetail;
   onApprove: () => void;
-  onReject: () => void;
+  onConfirmReject: () => void;
   onComplete: () => void;
   isApprovePending: boolean;
   isRejectPending: boolean;
@@ -303,8 +303,10 @@ function RequestCard({
   rejectId: string | null;
   rejectReason: string;
   setRejectReason: (v: string) => void;
+  setRejectId: (v: string | null) => void;
 }) {
   const StatusIcon = STATUS_ICON[r.status];
+  const isRejectOpen = rejectId === r.id;
 
   return (
     <div className="glass-panel rounded-xl p-5">
@@ -361,7 +363,7 @@ function RequestCard({
 
         {/* Actions */}
         <div className="flex flex-col gap-2 shrink-0">
-          {r.status === 'pending' && (
+          {r.status === 'pending' && !isRejectOpen && (
             <>
               <Button
                 size="sm"
@@ -372,20 +374,49 @@ function RequestCard({
                 <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
                 Approve
               </Button>
-              <Button variant="outline" size="sm" onClick={onReject} disabled={isRejectPending}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setRejectId(r.id)}
+              >
                 <XCircle className="h-3.5 w-3.5 mr-1" />
                 Reject
               </Button>
-              {rejectId === r.id && (
-                <Textarea
-                  placeholder="Reason for rejection..."
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  className="text-xs min-h-[60px]"
-                  autoFocus
-                />
-              )}
             </>
+          )}
+          {r.status === 'pending' && isRejectOpen && (
+            <div className="flex flex-col gap-2 w-56">
+              <Textarea
+                placeholder="Reason for rejection..."
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                className="text-xs min-h-[60px]"
+                autoFocus
+              />
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={onConfirmReject}
+                disabled={isRejectPending || !rejectReason.trim()}
+              >
+                {isRejectPending ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                ) : (
+                  <XCircle className="h-3.5 w-3.5 mr-1" />
+                )}
+                Confirm Reject
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setRejectId(null);
+                  setRejectReason('');
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
           )}
           {r.status === 'approved' && (
             <Button size="sm" variant="outline" onClick={onComplete} disabled={isCompletePending}>
