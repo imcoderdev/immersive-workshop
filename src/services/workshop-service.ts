@@ -128,6 +128,19 @@ export async function getMachineById(id: string): Promise<Machine> {
   return data as Machine;
 }
 
+/** Find the first machine matching a given name (case-insensitive). */
+export async function getMachineByName(name: string): Promise<Machine | null> {
+  const { data, error } = await supabase
+    .from('machines')
+    .select('*')
+    .ilike('name', name)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as Machine | null;
+}
+
 export async function createMachine(machine: Partial<Machine>): Promise<Machine> {
   const { data, error } = await supabase
     .from('machines')

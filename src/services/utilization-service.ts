@@ -27,21 +27,23 @@ export async function createUtilizationRequest(
   } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
-  // Fetch machine to auto-assign supervisor
+  // Fetch machine to auto-assign supervisor (fallback to added_by)
   const { data: machine, error: machineErr } = await supabase
     .from('machines')
-    .select('supervisor_id')
+    .select('supervisor_id, added_by')
     .eq('id', input.machine_id)
     .single();
 
   if (machineErr) throw machineErr;
+
+  const supervisorId = machine?.supervisor_id ?? machine?.added_by ?? null;
 
   const { data, error } = await supabase
     .from('machine_utilization_requests')
     .insert({
       user_id: user.id,
       machine_id: input.machine_id,
-      supervisor_id: machine?.supervisor_id ?? null,
+      supervisor_id: supervisorId,
       work_type: input.work_type,
       work_description: input.work_description || null,
       raw_material_source: input.raw_material_source,

@@ -36,7 +36,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
-import { getMachineById, getAllMachines } from '@/services/workshop-service';
+import { getMachineById, getMachineByName } from '@/services/workshop-service';
 import {
   createUtilizationRequest,
   checkRecentSafetyAcknowledgement,
@@ -103,29 +103,66 @@ export default function UtilizationForm() {
   const { profile } = useAuthStore();
   const { toast } = useToast();
 
-  // Machine selection state (when no URL param)
-  const [selectedMachineId, setSelectedMachineId] = useState<string>(urlMachineId ?? '');
-  const activeMachineId = urlMachineId || selectedMachineId || undefined;
+  // Machine selection state — mirrors faculty catalog picker
+  const [selectedCatalog, setSelectedCatalog] = useState<string>('');
+  const [customMachineName, setCustomMachineName] = useState('');
+  const [resolvedMachineId, setResolvedMachineId] = useState<string | null>(null);
+  const [machineNotFound, setMachineNotFound] = useState(false);
+  const [resolving, setResolving] = useState(false);
+
+  const activeMachineId = urlMachineId || resolvedMachineId || undefined;
 
   // SOP interaction tracking
   const sopContainerRef = useRef<HTMLDivElement>(null);
   const [sopScrolled, setSopScrolled] = useState(false);
   const [safetyCheckboxEnabled, setSafetyCheckboxEnabled] = useState(false);
 
-  // Fetch all machines for the picker (only when no URL param)
-  const { data: allMachines = [] } = useQuery({
-    queryKey: ['all-machines'],
-    queryFn: getAllMachines,
-    enabled: !urlMachineId,
-  });
+  // Resolve catalog selection → DB machine by name
+  const resolveMachine = useCallback(async (name: string) => {
+    if (!name) {
+      setResolvedMachineId(null);
+      setMachineNotFound(false);
+      return;
+    }
+    setResolving(true);
+    setMachineNotFound(false);
+    try {
+      const found = await getMachineByName(name);
+      if (found) {
+        setResolvedMachineId(found.id);
+        setMachineNotFound(false);
+      } else {
+        setResolvedMachineId(null);
+        setMachineNotFound(true);
+      }
+    } catch {
+      setResolvedMachineId(null);
+      setMachineNotFound(true);
+    } finally {
+      setResolving(false);
+    }
+  }, []);
 
-  // Group machines by catalog name for display
-  const catalogMachines = allMachines.filter((m) =>
-    (MACHINE_CATALOG as readonly string[]).includes(m.name)
-  );
-  const otherMachines = allMachines.filter(
-    (m) => !(MACHINE_CATALOG as readonly string[]).includes(m.name)
-  );
+  // When catalog selection changes, resolve
+  const handleCatalogChange = useCallback((value: string) => {
+    setSelectedCatalog(value);
+    setSopScrolled(false);
+    setSafetyCheckboxEnabled(false);
+    if (value !== '__other__') {
+      setCustomMachineName('');
+      resolveMachine(value);
+    } else {
+      setResolvedMachineId(null);
+      setMachineNotFound(false);
+    }
+  }, [resolveMachine]);
+
+  // For "Other" custom name — resolve on blur
+  const handleCustomNameBlur = useCallback(() => {
+    if (selectedCatalog === '__other__' && customMachineName.trim()) {
+      resolveMachine(customMachineName.trim());
+    }
+  }, [selectedCatalog, customMachineName, resolveMachine]);
 
   // Queries
   const { data: machine, isLoading: machineLoading } = useQuery({
@@ -282,23 +319,38 @@ export default function UtilizationForm() {
                   <p className="text-xs text-muted-foreground">Choose the machine you want to use</p>
                 </div>
               </div>
-              <Select value={selectedMachineId} onValueChange={(v) => { setSelectedMachineId(v); setSopScrolled(false); setSafetyCheckboxEnabled(false); }}>
+              <Select value={selectedCatalog} onValueChange={handleCatalogChange}>
                 <SelectTrigger aria-label="Select machine">
                   <SelectValue placeholder="Pick a machine" />
                 </SelectTrigger>
                 <SelectContent className="z-[70]">
-                  {catalogMachines.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
+                  {MACHINE_CATALOG.map((name) => (
+                    <SelectItem key={name} value={name}>{name}</SelectItem>
                   ))}
-                  {otherMachines.length > 0 && catalogMachines.length > 0 && (
-                    <SelectItem disabled value="__sep__" className="text-xs text-muted-foreground">── Other machines ──</SelectItem>
-                  )}
-                  {otherMachines.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                  ))}
+                  <SelectItem value="__other__">Other (custom name)</SelectItem>
                 </SelectContent>
               </Select>
-              {machine && (
+              {selectedCatalog === '__other__' && (
+                <Input
+                  value={customMachineName}
+                  onChange={(e) => setCustomMachineName(e.target.value)}
+                  onBlur={handleCustomNameBlur}
+                  placeholder="Enter custom machine name"
+                  className="mt-2"
+                />
+              )}
+              {resolving && (
+                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Looking up machine...
+                </div>
+              )}
+              {machineNotFound && !resolving && (
+                <div className="mt-2 flex items-center gap-2 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  This machine hasn't been added by a faculty member yet. Ask your supervisor to add it first.
+                </div>
+              )}
+              {machine && !resolving && (
                 <div className="mt-3 p-3 rounded-lg bg-muted/20 border border-border/20">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{machine.name}</span>

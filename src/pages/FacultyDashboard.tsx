@@ -193,6 +193,7 @@ export default function FacultyDashboard() {
         ...finalForm,
         workshop_id: workshopId,
         added_by: profile?.id,
+        supervisor_id: profile?.id,
         technical_specs: {},
         images: [],
       });
