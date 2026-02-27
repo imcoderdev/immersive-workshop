@@ -19,8 +19,15 @@ import AdminDashboard from "./pages/AdminDashboard";
 import SupervisorDashboard from "./pages/SupervisorDashboard";
 import UtilizationForm from "./pages/UtilizationForm";
 import NotFound from "./pages/NotFound";
+import { useRealtimeInvalidation } from "./hooks/use-realtime";
 
 const queryClient = new QueryClient();
+
+/** Wrapper that activates the global realtime → query-cache bridge */
+function RealtimeBridge({ children }: { children: React.ReactNode }) {
+  useRealtimeInvalidation();
+  return <>{children}</>;
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -29,6 +36,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <RealtimeBridge>
           <Navbar />
           <Routes>
             <Route path="/" element={<LandingPage />} />
@@ -87,6 +95,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
           <Footer />
+          </RealtimeBridge>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
