@@ -350,6 +350,12 @@ export default function UtilizationForm() {
                   {machine.description && (
                     <p className="text-xs text-muted-foreground mt-1">{machine.description}</p>
                   )}
+                  {!machine.supervisor_id && (
+                    <div className="mt-2 flex items-center gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/30 text-xs text-yellow-400">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      No faculty assigned to this machine. Your request may take longer to be reviewed.
+                    </div>
+                  )}
                 </div>
               )}
             </>
