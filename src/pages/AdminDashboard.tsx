@@ -43,7 +43,7 @@ import { getAllMachines, createMachine, updateMachine, deleteMachine } from '@/s
 import { getAllUtilizationRequests } from '@/services/utilization-service';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Machine, Profile, UserRole, UtilizationStatus } from '@/types/database';
 import { utilizationStatusColor, WORK_TYPE_LABELS, RAW_MATERIAL_LABELS, MACHINE_CATALOG } from '@/types/database';
 import { useAuthStore } from '@/stores/auth-store';
@@ -88,20 +88,27 @@ function MachineFormModal({
   const qc = useQueryClient();
   const isEdit = !!machine;
 
-  const [form, setForm] = useState<MachineFormState>(() =>
-    machine
-      ? {
-          name: machine.name,
-          shop_type: machine.shop_type ?? '',
-          description: machine.description ?? '',
-          max_booking_hours: machine.max_booking_hours,
-          status: machine.status,
-          supervisor_id: machine.supervisor_id ?? '',
-          department: machine.department ?? '',
-          is_bookable: machine.is_bookable,
-        }
-      : { ...defaultMachineForm },
-  );
+  const [form, setForm] = useState<MachineFormState>({ ...defaultMachineForm });
+
+  // Sync form state when modal opens or machine changes
+  useEffect(() => {
+    if (open) {
+      setForm(
+        machine
+          ? {
+              name: machine.name,
+              shop_type: machine.shop_type ?? '',
+              description: machine.description ?? '',
+              max_booking_hours: machine.max_booking_hours,
+              status: machine.status,
+              supervisor_id: machine.supervisor_id ?? '',
+              department: machine.department ?? '',
+              is_bookable: machine.is_bookable,
+            }
+          : { ...defaultMachineForm },
+      );
+    }
+  }, [open, machine]);
 
   const createM = useMutation({
     mutationFn: (payload: Partial<Machine>) => createMachine(payload),
