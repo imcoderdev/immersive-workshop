@@ -2,11 +2,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Navbar } from "@/components/layout/Navbar";
 import { Footer } from "@/components/layout/Footer";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { useAuthStore } from "@/stores/auth-store";
 import LandingPage from "./pages/LandingPage";
 import AuthPage from "./pages/AuthPage";
 import AuthCallback from "./pages/AuthCallback";
@@ -26,6 +27,14 @@ const queryClient = new QueryClient();
 function RealtimeBridge({ children }: { children: React.ReactNode }) {
   useRealtimeInvalidation();
   return <>{children}</>;
+}
+
+/** Redirects /dashboard to the correct role-specific dashboard */
+function DashboardRouter() {
+  const { profile } = useAuthStore();
+  if (profile?.role === 'admin') return <Navigate to="/admin" replace />;
+  if (profile?.role === 'faculty') return <Navigate to="/faculty" replace />;
+  return <StudentDashboard />;
 }
 
 const App = () => (
@@ -55,7 +64,7 @@ const App = () => (
               path="/dashboard"
               element={
                 <ProtectedRoute>
-                  <StudentDashboard />
+                  <DashboardRouter />
                 </ProtectedRoute>
               }
             />
