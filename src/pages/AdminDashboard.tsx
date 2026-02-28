@@ -696,7 +696,7 @@ export default function AdminDashboard() {
                           <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
                             <div className="h-full rounded-full bg-gradient-to-r from-primary to-secondary transition-all duration-700" style={{ width: `${pct}%` }} />
                           </div>
-                          <div className="text-xs text-muted-foreground mt-1">{machine.total_bookings} bookings</div>
+                          <div className="text-xs text-muted-foreground mt-1">{machine.total_bookings} requests</div>
                         </div>
                       );
                     })}
