@@ -16,7 +16,6 @@ import WorkshopViewer from "./pages/WorkshopViewer";
 import StudentDashboard from "./pages/StudentDashboard";
 import FacultyDashboard from "./pages/FacultyDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
-import SupervisorDashboard from "./pages/SupervisorDashboard";
 import UtilizationForm from "./pages/UtilizationForm";
 import NotFound from "./pages/NotFound";
 import { useRealtimeInvalidation } from "./hooks/use-realtime";
@@ -73,14 +72,6 @@ const App = () => (
               element={
                 <ProtectedRoute allowedRoles={['admin']}>
                   <AdminDashboard />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/supervisor"
-              element={
-                <ProtectedRoute allowedRoles={['faculty', 'workshop_supervisor', 'admin']}>
-                  <SupervisorDashboard />
                 </ProtectedRoute>
               }
             />

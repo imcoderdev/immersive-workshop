@@ -1,5 +1,6 @@
 // Database types matching Supabase schema
-export type UserRole = 'student' | 'faculty' | 'workshop_supervisor' | 'admin' | 'principal';
+// Only 3 active roles: student, faculty, admin
+export type UserRole = 'student' | 'faculty' | 'admin';
 export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'completed' | 'cancelled';
 export type MachineStatus = 'available' | 'reserved' | 'busy' | 'maintenance';
 export type HotspotType = 'machine_info' | 'safety' | 'booking' | 'navigation';

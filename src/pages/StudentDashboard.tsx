@@ -8,7 +8,6 @@ import {
   AlertCircle,
   ArrowRight,
   Shield,
-  BarChart3,
   Settings,
   Compass,
   XCircle,
@@ -66,15 +65,7 @@ export default function StudentDashboard() {
   });
 
   const activeBookings = bookings.filter((b) => b.status === 'approved' || b.status === 'pending');
-  const completedBookings = bookings.filter((b) => b.status === 'completed');
   const upcomingBookings = bookings.filter((b) => ['pending', 'approved'].includes(b.status) && new Date(b.date) >= new Date()).slice(0, 5);
-  const totalHours = bookings
-    .filter((b) => b.status === 'completed')
-    .reduce((sum, b) => {
-      const start = new Date(`2000-01-01T${b.start_time}`);
-      const end = new Date(`2000-01-01T${b.end_time}`);
-      return sum + (end.getTime() - start.getTime()) / 3600000;
-    }, 0);
 
   const handleCancel = async (id: string) => {
     try {
@@ -100,11 +91,10 @@ export default function StudentDashboard() {
           <Button variant="outline" size="sm"><Settings className="h-4 w-4 mr-1" />Account Settings</Button>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-3 gap-4 mb-8">
           <StatCard icon={Calendar} label="Active Bookings" value={activeBookings.length} />
           <StatCard icon={Wrench} label="Utilization Requests" value={utilizationRequests.length} />
           <StatCard icon={Shield} label="Safety Cleared" value={safetyRecords.length} />
-          <StatCard icon={BarChart3} label="Hours Logged" value={Math.round(totalHours)} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
