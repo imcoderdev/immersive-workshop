@@ -13,6 +13,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -163,6 +164,7 @@ function MachineFormModal({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Machine' : 'Add Machine'}</DialogTitle>
+          <DialogDescription>{isEdit ? 'Update machine details and faculty assignment.' : 'Add a new machine from the catalog.'}</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -223,10 +225,10 @@ function MachineFormModal({
 
           <div>
             <label className="text-xs font-medium text-muted-foreground mb-1 block">Assign Faculty (Supervisor)</label>
-            <Select value={form.supervisor_id} onValueChange={(v) => setForm((f) => ({ ...f, supervisor_id: v }))}>
+            <Select value={form.supervisor_id || '__none__'} onValueChange={(v) => setForm((f) => ({ ...f, supervisor_id: v === '__none__' ? '' : v }))}>
               <SelectTrigger><SelectValue placeholder="Select faculty" /></SelectTrigger>
               <SelectContent className="z-[200]">
-                <SelectItem value="">None</SelectItem>
+                <SelectItem value="__none__">None</SelectItem>
                 {facultyList.map((f) => (
                   <SelectItem key={f.id} value={f.id}>{f.full_name} ({f.email})</SelectItem>
                 ))}
