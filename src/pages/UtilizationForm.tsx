@@ -475,32 +475,38 @@ export default function UtilizationForm() {
                 <Controller
                   name="date"
                   control={control}
-                  render={({ field }) => (
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            'w-full justify-start text-left font-normal mt-1.5',
-                            !field.value && 'text-muted-foreground',
-                          )}
-                          aria-label="Select date"
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {field.value ? format(field.value, 'PPP') : 'Pick a date'}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 z-[70]" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  )}
+                  render={({ field }) => {
+                    const [calOpen, setCalOpen] = useState(false);
+                    return (
+                      <Popover open={calOpen} onOpenChange={setCalOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              'w-full justify-start text-left font-normal mt-1.5',
+                              !field.value && 'text-muted-foreground',
+                            )}
+                            aria-label="Select date"
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {field.value ? format(field.value, 'PPP') : 'Pick a date'}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0 z-[70]" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={field.value}
+                            onSelect={(day) => {
+                              field.onChange(day);
+                              setCalOpen(false);
+                            }}
+                            disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                            initialFocus
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    );
+                  }}
                 />
                 {errors.date && (
                   <p className="text-xs text-destructive mt-1">{errors.date.message}</p>
