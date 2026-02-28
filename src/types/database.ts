@@ -254,16 +254,16 @@ export const RAW_MATERIAL_LABELS: Record<RawMaterialSource, string> = {
 
 /** Predefined machine catalog — admin picks from these when adding a machine */
 export const MACHINE_CATALOG = [
-  'CNC Lathe — Haas ST-10',
-  'Ultimaker S5 — FDM 3D Printer',
-  'Laser Cutter — Epilog Fusion Pro',
-  'Milling Machine — DMG MORI CMX 50U',
-  'Formlabs Form 3 — SLA Printer',
-  'Markforged X7 — Carbon Fiber Printer',
-  'Trumpf TruLaser 1030 — Fiber Laser',
-  'Lincoln Electric MIG Welder — Power MIG 260',
-  'Keysight DSOX3054T — Oscilloscope',
-  'Hexagon Absolute Arm — CMM',
+  'CNC',
+  'VMC',
+  '3D Printer Small',
+  '3D Printer Big (JAK)',
+  'CO2 Laser Cutting Machine',
+  'Plasma Machine',
+  'CNC Wood Router',
+  'TIG Welding Machine',
+  'MIG Welding Machine',
+  'Band Saw Machine',
   'New 3D Printer at Asst. W/S Cabin',
 ] as const;
 
