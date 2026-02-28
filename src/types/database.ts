@@ -254,7 +254,6 @@ export const RAW_MATERIAL_LABELS: Record<RawMaterialSource, string> = {
 
 /** Predefined machine catalog — admin picks from these when adding a machine */
 export const MACHINE_CATALOG = [
-  'CNC',
   'CNC Lathe — Haas ST-10',
   'Ultimaker S5 — FDM 3D Printer',
   'Laser Cutter — Epilog Fusion Pro',
