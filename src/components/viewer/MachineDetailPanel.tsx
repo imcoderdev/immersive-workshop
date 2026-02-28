@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { X, Play, FileText, Shield, Calendar, Clock, CheckCircle, AlertTriangle, Info, Wrench } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { X, Play, FileText, Shield, Calendar, Clock, CheckCircle, AlertTriangle, Info, Wrench, UserCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -10,22 +10,38 @@ import { checkSafetyAcknowledgement, acknowledgeSafety } from '@/services/bookin
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { getProfile } from '@/services/auth-service';
 import type { Machine, MachineStatus } from '@/types/database';
 import BookingModal from '@/components/viewer/BookingModal';
 
 const statusConfig: Record<MachineStatus, { label: string; color: string; icon: any }> = {
   available: { label: 'Available', color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', icon: CheckCircle },
   reserved: { label: 'Reserved', color: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30', icon: Clock },
-  busy: { label: 'Busy', color: 'bg-red-500/20 text-red-400 border-red-500/30', icon: AlertTriangle },
-  maintenance: { label: 'Maintenance', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30', icon: AlertTriangle },
+  busy: { label: 'In Use', color: 'bg-red-500/20 text-red-400 border-red-500/30', icon: AlertTriangle },
+  maintenance: { label: 'Under Maintenance', color: 'bg-orange-500/20 text-orange-400 border-orange-500/30', icon: AlertTriangle },
 };
 
 export function MachineDetailPanel() {
-  const { selectedHotspot, isDetailPanelOpen, closeDetailPanel } = useWorkshopStore();
+  const { selectedHotspot, isDetailPanelOpen, closeDetailPanel, machines } = useWorkshopStore();
   const { user } = useAuthStore();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const machine = selectedHotspot?.machine;
+
+  // Use live machine data from the store (refreshed via realtime) instead of stale hotspot snapshot
+  const machine = useMemo(() => {
+    const hotspotMachine = selectedHotspot?.machine;
+    if (!hotspotMachine) return null;
+    return machines.find((m) => m.id === hotspotMachine.id) ?? hotspotMachine;
+  }, [selectedHotspot, machines]);
+
+  // Fetch the assigned faculty name if machine has a supervisor
+  const { data: supervisorProfile } = useQuery({
+    queryKey: ['profile', machine?.supervisor_id],
+    queryFn: () => getProfile(machine!.supervisor_id!),
+    enabled: !!machine?.supervisor_id,
+    staleTime: 60_000,
+  });
 
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
   const [isAcknowledging, setIsAcknowledging] = useState(false);
@@ -76,7 +92,7 @@ export function MachineDetailPanel() {
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-white/10">
             <div className="flex-1 min-w-0">
-              <h2 className="text-lg font-semibold truncate">{selectedHotspot.label}</h2>
+              <h2 className="text-lg font-semibold truncate">{machine?.name ?? selectedHotspot.label}</h2>
               {machine && status && (
                 <Badge variant="outline" className={`mt-1 ${status.color}`}>
                   <StatusIcon className="h-3 w-3 mr-1" />
@@ -97,15 +113,48 @@ export function MachineDetailPanel() {
           <ScrollArea className="flex-1">
             <div className="p-4 space-y-6">
               {/* Description */}
-              {selectedHotspot.description && (
+              {(machine?.description || selectedHotspot.description) && (
                 <div>
                   <h3 className="text-sm font-medium text-muted-foreground mb-2">Description</h3>
-                  <p className="text-sm">{selectedHotspot.description}</p>
+                  <p className="text-sm">{machine?.description || selectedHotspot.description}</p>
                 </div>
               )}
 
               {machine && (
                 <>
+                  {/* Assigned Faculty & Department */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/30 border border-white/5">
+                      <UserCheck className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-muted-foreground">Assigned Faculty</p>
+                        {machine.supervisor_id ? (
+                          <p className="text-sm font-medium">{supervisorProfile?.full_name ?? 'Loading…'}</p>
+                        ) : (
+                          <p className="text-sm text-yellow-400">Not assigned</p>
+                        )}
+                      </div>
+                    </div>
+                    {(machine.shop_type || machine.department) && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {machine.shop_type && (
+                          <div className="p-2 rounded-lg bg-muted/30 border border-white/5">
+                            <p className="text-xs text-muted-foreground">Shop Type</p>
+                            <p className="text-sm font-medium">{machine.shop_type}</p>
+                          </div>
+                        )}
+                        {machine.department && (
+                          <div className="p-2 rounded-lg bg-muted/30 border border-white/5">
+                            <p className="text-xs text-muted-foreground">Department</p>
+                            <p className="text-sm font-medium">{machine.department}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <Separator className="bg-white/10" />
+
                   {/* Technical Specs */}
                   {machine.technical_specs && Object.keys(machine.technical_specs).length > 0 && (
                     <div>
