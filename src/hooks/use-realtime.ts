@@ -88,6 +88,70 @@ export function useRealtimeInvalidation() {
         },
       )
 
+      // ── resources ────────────────────────────────────────────
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'resources' },
+        (_payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          qc.invalidateQueries({ queryKey: ['resources'] });
+          qc.invalidateQueries({ queryKey: ['resource-details'] });
+          qc.invalidateQueries({ queryKey: ['shops'] });
+          qc.invalidateQueries({ queryKey: ['maintenance-due'] });
+          qc.invalidateQueries({ queryKey: ['admin-stats'] });
+        },
+      )
+
+      // ── safety_modules ───────────────────────────────────────
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'safety_modules' },
+        (_payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          qc.invalidateQueries({ queryKey: ['safety-modules'] });
+        },
+      )
+
+      // ── safety_module_acknowledgements ───────────────────────
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'safety_module_acknowledgements' },
+        (_payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          qc.invalidateQueries({ queryKey: ['safety-module-acks'] });
+          qc.invalidateQueries({ queryKey: ['safety-validity'] });
+        },
+      )
+
+      // ── practical_sessions ───────────────────────────────────
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'practical_sessions' },
+        (_payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          qc.invalidateQueries({ queryKey: ['practical-sessions'] });
+          qc.invalidateQueries({ queryKey: ['faculty-practicals'] });
+        },
+      )
+
+      // ── practical_attendance ─────────────────────────────────
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'practical_attendance' },
+        (_payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          qc.invalidateQueries({ queryKey: ['practical-attendance'] });
+          qc.invalidateQueries({ queryKey: ['my-attendance'] });
+        },
+      )
+
+      // ── tool_issue_requests ──────────────────────────────────
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tool_issue_requests' },
+        (_payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          qc.invalidateQueries({ queryKey: ['tool-issues'] });
+          qc.invalidateQueries({ queryKey: ['user-tool-issues'] });
+          qc.invalidateQueries({ queryKey: ['faculty-tool-issues'] });
+          qc.invalidateQueries({ queryKey: ['admin-stats'] });
+        },
+      )
+
       .subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
           console.log('[Realtime] Global channel subscribed');

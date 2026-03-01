@@ -16,6 +16,7 @@ import {
   Cpu,
   Loader2,
   Info,
+  Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,14 +43,25 @@ import {
   checkRecentSafetyAcknowledgement,
 } from '@/services/utilization-service';
 import { acknowledgeSafety } from '@/services/booking-service';
-import type { WorkType, RawMaterialSource } from '@/types/database';
-import { WORK_TYPE_LABELS, RAW_MATERIAL_LABELS, MACHINE_CATALOG } from '@/types/database';
+import type { WorkType, RawMaterialSource, StudentBranch, TeamName } from '@/types/database';
+import {
+  WORK_TYPE_LABELS,
+  RAW_MATERIAL_LABELS,
+  MACHINE_CATALOG,
+  BRANCH_LABELS,
+  TEAM_LABELS,
+} from '@/types/database';
 
 // ─── Zod Schema ───────────────────────────────────────────────────────────────
 
 const utilizationSchema = z
   .object({
-    work_type: z.enum(['team_project', 'final_year_project', 'academic_event', 'other'], {
+    roll_number: z.string().min(1, 'Roll number is required'),
+    branch: z.string().min(1, 'Branch is required'),
+    year: z.coerce.number().min(1).max(4, 'Year must be 1-4'),
+    division: z.string().min(1, 'Division is required'),
+    batch: z.string().min(1, 'Batch is required'),
+    work_type: z.enum(['first_year_practical', 'team_project', 'final_year_project', 'academic_event', 'other'], {
       required_error: 'Select a work type',
     }),
     work_description: z.string().optional(),
@@ -62,6 +74,9 @@ const utilizationSchema = z
     safety_acknowledged: z.literal(true, {
       errorMap: () => ({ message: 'You must acknowledge safety rules' }),
     }),
+    team_name: z.string().optional(),
+    team_name_other: z.string().optional(),
+    permission_letter_url: z.string().optional(),
   })
   .refine((d) => d.end_time > d.start_time, {
     message: 'End time must be after start time',
@@ -73,6 +88,20 @@ const utilizationSchema = z
       return true;
     },
     { message: 'Description is required when work type is "Other"', path: ['work_description'] },
+  )
+  .refine(
+    (d) => {
+      if (d.work_type === 'academic_event') return !!d.work_description?.trim();
+      return true;
+    },
+    { message: 'Description is required for Academic Event', path: ['work_description'] },
+  )
+  .refine(
+    (d) => {
+      if (d.work_type === 'team_project' || d.work_type === 'final_year_project') return !!d.team_name;
+      return true;
+    },
+    { message: 'Team name is required', path: ['team_name'] },
   );
 
 type FormValues = z.infer<typeof utilizationSchema>;
@@ -186,6 +215,11 @@ export default function UtilizationForm() {
   } = useForm<FormValues>({
     resolver: zodResolver(utilizationSchema),
     defaultValues: {
+      roll_number: profile?.roll_number || '',
+      branch: profile?.branch || '',
+      year: profile?.year || undefined,
+      division: profile?.division || '',
+      batch: profile?.batch || '',
       work_type: undefined,
       work_description: '',
       raw_material_source: undefined,
@@ -193,6 +227,9 @@ export default function UtilizationForm() {
       start_time: '',
       end_time: '',
       safety_acknowledged: undefined,
+      team_name: undefined,
+      team_name_other: '',
+      permission_letter_url: '',
     },
   });
 
@@ -217,6 +254,11 @@ export default function UtilizationForm() {
     mutationFn: async (values: FormValues) => {
       if (!activeMachineId) throw new Error('Please select a machine');
 
+      // Redirect first_year_practical to the practical module
+      if (values.work_type === 'first_year_practical') {
+        throw new Error('First Year Practicals must be submitted through the Practical Module by your faculty.');
+      }
+
       // Record safety acknowledgement if not recently done
       if (!recentSafety) {
         await acknowledgeSafety(activeMachineId);
@@ -231,6 +273,14 @@ export default function UtilizationForm() {
         start_time: values.start_time,
         end_time: values.end_time,
         safety_acknowledged: true,
+        roll_number: values.roll_number,
+        branch: values.branch,
+        year: values.year,
+        division: values.division,
+        batch: values.batch,
+        team_name: values.team_name,
+        team_name_other: values.team_name_other,
+        permission_letter_url: values.permission_letter_url,
       });
     },
     onSuccess: () => {
@@ -382,14 +432,69 @@ export default function UtilizationForm() {
           )}
         </section>
 
-        {/* User Info (read-only) */}
+        {/* Student Information */}
         <section className="glass-panel rounded-xl p-5 mb-6">
-          <h3 className="text-sm font-medium text-muted-foreground mb-3">Your Information</h3>
+          <h3 className="text-sm font-medium text-muted-foreground mb-3">Student Information</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <ReadOnlyField label="Name" value={profile!.full_name} />
             <ReadOnlyField label="Email" value={profile!.email} />
-            {profile!.department && <ReadOnlyField label="Branch" value={profile!.department} />}
-            {profile!.phone && <ReadOnlyField label="Mobile" value={profile!.phone} />}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+            <div>
+              <Label htmlFor="roll_number">Roll Number *</Label>
+              <Input id="roll_number" {...register('roll_number')} className="mt-1.5" placeholder="e.g. 22CO101" />
+              {errors.roll_number && <p className="text-xs text-destructive mt-1">{errors.roll_number.message}</p>}
+            </div>
+            <div>
+              <Label htmlFor="branch">Branch *</Label>
+              <Controller
+                name="branch"
+                control={control}
+                render={({ field }) => (
+                  <Select onValueChange={field.onChange} value={field.value ?? ''}>
+                    <SelectTrigger id="branch" className="mt-1.5" aria-label="Branch">
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent className="z-[70]">
+                      {(Object.keys(BRANCH_LABELS) as StudentBranch[]).map((key) => (
+                        <SelectItem key={key} value={key}>{BRANCH_LABELS[key]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.branch && <p className="text-xs text-destructive mt-1">{errors.branch.message}</p>}
+            </div>
+            <div>
+              <Label htmlFor="year">Year *</Label>
+              <Controller
+                name="year"
+                control={control}
+                render={({ field }) => (
+                  <Select onValueChange={(v) => field.onChange(Number(v))} value={field.value?.toString() ?? ''}>
+                    <SelectTrigger id="year" className="mt-1.5" aria-label="Year">
+                      <SelectValue placeholder="Select year" />
+                    </SelectTrigger>
+                    <SelectContent className="z-[70]">
+                      {[1, 2, 3, 4].map((y) => (
+                        <SelectItem key={y} value={y.toString()}>Year {y}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.year && <p className="text-xs text-destructive mt-1">{errors.year.message}</p>}
+            </div>
+            <div>
+              <Label htmlFor="division">Division *</Label>
+              <Input id="division" {...register('division')} className="mt-1.5" placeholder="e.g. A" />
+              {errors.division && <p className="text-xs text-destructive mt-1">{errors.division.message}</p>}
+            </div>
+            <div>
+              <Label htmlFor="batch">Batch *</Label>
+              <Input id="batch" {...register('batch')} className="mt-1.5" placeholder="e.g. B1" />
+              {errors.batch && <p className="text-xs text-destructive mt-1">{errors.batch.message}</p>}
+            </div>
           </div>
         </section>
 
@@ -425,8 +530,68 @@ export default function UtilizationForm() {
                 )}
               </div>
 
-              {/* Work Description (shown for "other" or optionally) */}
-              {workType === 'other' && (
+              {/* First Year Practical redirect notice */}
+              {workType === 'first_year_practical' && (
+                <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                  <p className="text-sm text-blue-400 font-medium mb-1">First Year Practical</p>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    First year practical sessions are managed by faculty through the Practical Module.
+                    Contact your faculty to create a session, then mark attendance there.
+                  </p>
+                  <Button size="sm" variant="outline" asChild>
+                    <Link to="/dashboard">Go to Dashboard</Link>
+                  </Button>
+                </div>
+              )}
+
+              {/* Team Name (for team_project / final_year_project) */}
+              {(workType === 'team_project' || workType === 'final_year_project') && (
+                <>
+                  <div>
+                    <Label htmlFor="team_name">Team Name *</Label>
+                    <Controller
+                      name="team_name"
+                      control={control}
+                      render={({ field }) => (
+                        <Select onValueChange={field.onChange} value={field.value ?? ''}>
+                          <SelectTrigger id="team_name" className="mt-1.5" aria-label="Team name">
+                            <SelectValue placeholder="Select team" />
+                          </SelectTrigger>
+                          <SelectContent className="z-[70]">
+                            {(Object.keys(TEAM_LABELS) as TeamName[]).map((key) => (
+                              <SelectItem key={key} value={key}>{TEAM_LABELS[key]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    {errors.team_name && <p className="text-xs text-destructive mt-1">{errors.team_name.message}</p>}
+                  </div>
+                  {watch('team_name') === 'other' && (
+                    <div>
+                      <Label htmlFor="team_name_other">Other Team Name</Label>
+                      <Input id="team_name_other" {...register('team_name_other')} className="mt-1.5" placeholder="Enter team name" />
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Permission Letter (for final_year_project) */}
+              {workType === 'final_year_project' && (
+                <div>
+                  <Label htmlFor="permission_letter_url">Permission Letter URL</Label>
+                  <Input
+                    id="permission_letter_url"
+                    {...register('permission_letter_url')}
+                    className="mt-1.5"
+                    placeholder="Paste a link to the uploaded permission letter"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Upload to Google Drive or similar and paste the share link</p>
+                </div>
+              )}
+
+              {/* Work Description (shown for "other", "academic_event", or optionally) */}
+              {(workType === 'other' || workType === 'academic_event') && (
                 <div>
                   <Label htmlFor="work_description">Work Description *</Label>
                   <Textarea

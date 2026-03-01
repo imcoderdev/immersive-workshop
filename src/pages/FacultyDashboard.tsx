@@ -23,6 +23,9 @@ import {
   AlertTriangle,
   Loader2,
   Shield,
+  Wrench,
+  Package,
+  AlertCircle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import {
@@ -31,29 +34,42 @@ import {
   approveUtilizationRequest,
   rejectUtilizationRequest,
   completeUtilizationRequest,
+  notCompleteUtilizationRequest,
 } from '@/services/utilization-service';
 import { getAllMachines } from '@/services/workshop-service';
+import {
+  getFacultyToolIssueRequests,
+  approveToolIssueRequest,
+  rejectToolIssueRequest,
+  issueToolToStudent,
+  returnTool,
+} from '@/services/tool-issue-service';
+import { getMaintenanceDueResources, markMaintenanceDone } from '@/services/resource-service';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
 import type {
   UtilizationRequestDetail,
   UtilizationStatus,
+  ToolIssueDetail,
 } from '@/types/database';
 import {
   utilizationStatusColor,
   WORK_TYPE_LABELS,
   RAW_MATERIAL_LABELS,
+  toolIssueStatusColor,
+  TOOL_ISSUE_STATUS_LABELS,
 } from '@/types/database';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TabId = 'pending' | 'schedule' | 'machines';
+type TabId = 'pending' | 'schedule' | 'machines' | 'tool_issues' | 'maintenance';
 
 const STATUS_ICON: Record<UtilizationStatus, typeof Clock> = {
   pending: Clock,
   approved: CheckCircle2,
   rejected: XCircle,
   completed: BarChart3,
+  not_completed: AlertCircle,
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -91,6 +107,20 @@ export default function FacultyDashboard() {
     queryKey: ['all-machines'],
     queryFn: getAllMachines,
   });
+
+  // Tool issue requests for resources supervised by this faculty
+  const { data: toolIssueRequests = [] } = useQuery({
+    queryKey: ['faculty-tool-issues'],
+    queryFn: getFacultyToolIssueRequests,
+  });
+
+  // Maintenance due resources
+  const { data: maintenanceDue = [] } = useQuery({
+    queryKey: ['maintenance-due'],
+    queryFn: getMaintenanceDueResources,
+  });
+
+  const pendingToolIssues = toolIssueRequests.filter((t) => t.status === 'pending');
 
   // Machines assigned to this faculty (supervisor_id = me)
   const myMachines = allMachines.filter(
@@ -161,6 +191,81 @@ export default function FacultyDashboard() {
       toast({ title: 'Error', description: e.message, variant: 'destructive' }),
   });
 
+  const notCompleteMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      notCompleteUtilizationRequest(id, reason),
+    onSuccess: () => {
+      toast({ title: 'Marked as not completed' });
+      queryClient.invalidateQueries({ queryKey: ['supervisor-utilization'] });
+      queryClient.invalidateQueries({ queryKey: ['supervisor-stats'] });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
+  // Tool issue mutations
+  const approveToolMut = useMutation({
+    mutationFn: approveToolIssueRequest,
+    onSuccess: () => {
+      toast({ title: 'Tool request approved' });
+      queryClient.invalidateQueries({ queryKey: ['faculty-tool-issues'] });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
+  const [toolRejectId, setToolRejectId] = useState<string | null>(null);
+  const [toolRejectReason, setToolRejectReason] = useState('');
+
+  const rejectToolMut = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      rejectToolIssueRequest(id, reason),
+    onSuccess: () => {
+      toast({ title: 'Tool request rejected' });
+      queryClient.invalidateQueries({ queryKey: ['faculty-tool-issues'] });
+      setToolRejectId(null);
+      setToolRejectReason('');
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
+  const issueToolMut = useMutation({
+    mutationFn: issueToolToStudent,
+    onSuccess: () => {
+      toast({ title: 'Tool issued to student' });
+      queryClient.invalidateQueries({ queryKey: ['faculty-tool-issues'] });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
+  const [returnId, setReturnId] = useState<string | null>(null);
+  const [returnCondition, setReturnCondition] = useState('');
+
+  const returnToolMut = useMutation({
+    mutationFn: ({ id, condition }: { id: string; condition: string }) =>
+      returnTool(id, condition),
+    onSuccess: () => {
+      toast({ title: 'Tool returned' });
+      queryClient.invalidateQueries({ queryKey: ['faculty-tool-issues'] });
+      setReturnId(null);
+      setReturnCondition('');
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
+  const maintenanceDoneMut = useMutation({
+    mutationFn: markMaintenanceDone,
+    onSuccess: () => {
+      toast({ title: 'Maintenance marked as done' });
+      queryClient.invalidateQueries({ queryKey: ['maintenance-due'] });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
   const handleConfirmReject = (id: string) => {
     if (rejectReason.trim()) {
       rejectMut.mutate({ id, reason: rejectReason });
@@ -204,7 +309,9 @@ export default function FacultyDashboard() {
           {([
             { id: 'pending' as TabId, label: 'Pending Approvals', count: pendingRequests.length },
             { id: 'schedule' as TabId, label: "Today's Schedule", count: todaySchedule.length },
+            { id: 'tool_issues' as TabId, label: 'Tool Issues', count: pendingToolIssues.length },
             { id: 'machines' as TabId, label: 'My Machines', count: myMachines.length },
+            { id: 'maintenance' as TabId, label: 'Maintenance', count: maintenanceDue.length },
           ]).map((tab) => (
             <button
               key={tab.id}
@@ -232,7 +339,7 @@ export default function FacultyDashboard() {
         </div>
 
         {/* Filters (for pending / schedule tabs) */}
-        {activeTab !== 'machines' && (
+        {(activeTab === 'pending' || activeTab === 'schedule') && (
           <div className="flex flex-wrap gap-3 mb-6 items-end">
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">Machine</label>
@@ -268,7 +375,7 @@ export default function FacultyDashboard() {
         )}
 
         {/* ─── Pending / Schedule tab content ──────────────────────────────── */}
-        {activeTab !== 'machines' && (
+        {(activeTab === 'pending' || activeTab === 'schedule') && (
           <>
             {isLoading ? (
               <div className="flex justify-center py-16">
@@ -292,6 +399,7 @@ export default function FacultyDashboard() {
                     onApprove={() => approveMut.mutate(req.id)}
                     onConfirmReject={() => handleConfirmReject(req.id)}
                     onComplete={() => completeMut.mutate(req.id)}
+                    onNotComplete={(reason: string) => notCompleteMut.mutate({ id: req.id, reason })}
                     isApprovePending={approveMut.isPending}
                     isRejectPending={rejectMut.isPending}
                     isCompletePending={completeMut.isPending}
@@ -353,6 +461,131 @@ export default function FacultyDashboard() {
             )}
           </div>
         )}
+
+        {/* ─── Tool Issues tab ─────────────────────────────────────────────── */}
+        {activeTab === 'tool_issues' && (
+          <div className="space-y-4">
+            {toolIssueRequests.length === 0 ? (
+              <div className="text-center py-16">
+                <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                <p className="text-sm text-muted-foreground">No tool issue requests.</p>
+              </div>
+            ) : (
+              toolIssueRequests.map((t) => (
+                <div key={t.id} className="glass-panel rounded-xl p-5">
+                  <div className="flex flex-col sm:flex-row sm:items-start gap-4">
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-semibold">{t.user_name}</h3>
+                        <Badge variant="outline" className={cn('text-xs', toolIssueStatusColor(t.status))}>
+                          {TOOL_ISSUE_STATUS_LABELS[t.status]}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Wrench className="h-3 w-3" /> {t.resource_name}
+                        </span>
+                        <span>Qty: {t.quantity_requested}</span>
+                        {t.shop_name && <span>Shop: {t.shop_name}</span>}
+                        <span>{format(new Date(t.created_at), 'MMM d, yyyy HH:mm')}</span>
+                      </div>
+                      {t.user_email && <p className="text-xs text-muted-foreground">{t.user_email}</p>}
+                      {t.rejection_reason && (
+                        <div className="flex items-start gap-1.5 text-xs text-destructive">
+                          <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                          <span>Rejected: {t.rejection_reason}</span>
+                        </div>
+                      )}
+                      {t.condition_on_return && (
+                        <p className="text-xs text-muted-foreground">Return condition: {t.condition_on_return}</p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-2 shrink-0">
+                      {t.status === 'pending' && toolRejectId !== t.id && (
+                        <>
+                          <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => approveToolMut.mutate(t.id)} disabled={approveToolMut.isPending}>
+                            <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => setToolRejectId(t.id)}>
+                            <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
+                          </Button>
+                        </>
+                      )}
+                      {t.status === 'pending' && toolRejectId === t.id && (
+                        <div className="flex flex-col gap-2 w-56">
+                          <Textarea placeholder="Reason for rejection..." value={toolRejectReason} onChange={(e) => setToolRejectReason(e.target.value)} className="text-xs min-h-[60px]" autoFocus />
+                          <Button size="sm" variant="destructive" onClick={() => rejectToolMut.mutate({ id: t.id, reason: toolRejectReason })} disabled={rejectToolMut.isPending || !toolRejectReason.trim()}>
+                            Confirm Reject
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => { setToolRejectId(null); setToolRejectReason(''); }}>Cancel</Button>
+                        </div>
+                      )}
+                      {t.status === 'approved' && (
+                        <Button size="sm" onClick={() => issueToolMut.mutate(t.id)} disabled={issueToolMut.isPending}>
+                          <Package className="h-3.5 w-3.5 mr-1" /> Issue to Student
+                        </Button>
+                      )}
+                      {t.status === 'issued' && returnId !== t.id && (
+                        <Button size="sm" variant="outline" onClick={() => setReturnId(t.id)}>
+                          Mark Returned
+                        </Button>
+                      )}
+                      {t.status === 'issued' && returnId === t.id && (
+                        <div className="flex flex-col gap-2 w-56">
+                          <Input placeholder="Condition on return" value={returnCondition} onChange={(e) => setReturnCondition(e.target.value)} className="text-xs" autoFocus />
+                          <Button size="sm" onClick={() => returnToolMut.mutate({ id: t.id, condition: returnCondition || 'good' })} disabled={returnToolMut.isPending}>
+                            Confirm Return
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => { setReturnId(null); setReturnCondition(''); }}>Cancel</Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* ─── Maintenance tab ─────────────────────────────────────────────── */}
+        {activeTab === 'maintenance' && (
+          <div className="glass-panel rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-5">
+              <Wrench className="h-5 w-5 text-primary" />
+              <h2 className="text-base font-semibold">
+                Maintenance Due ({maintenanceDue.length})
+              </h2>
+            </div>
+
+            {maintenanceDue.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No resources due for maintenance.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {maintenanceDue.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border/30">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-orange-500/10 flex items-center justify-center">
+                        <AlertCircle className="h-5 w-5 text-orange-400" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold">{r.name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Last: {r.last_maintenance_date ?? 'Never'} · Due: {r.next_maintenance_due ?? 'Overdue'}
+                        </div>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => maintenanceDoneMut.mutate(r.id)} disabled={maintenanceDoneMut.isPending}>
+                      <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Done
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -365,6 +598,7 @@ function RequestCard({
   onApprove,
   onConfirmReject,
   onComplete,
+  onNotComplete,
   isApprovePending,
   isRejectPending,
   isCompletePending,
@@ -378,6 +612,7 @@ function RequestCard({
   onApprove: () => void;
   onConfirmReject: () => void;
   onComplete: () => void;
+  onNotComplete: (reason: string) => void;
   isApprovePending: boolean;
   isRejectPending: boolean;
   isCompletePending: boolean;
@@ -389,6 +624,8 @@ function RequestCard({
 }) {
   const StatusIcon = STATUS_ICON[r.status];
   const isRejectOpen = rejectId === r.id;
+  const [notCompleteOpen, setNotCompleteOpen] = useState(false);
+  const [notCompleteReason, setNotCompleteReason] = useState('');
 
   return (
     <div className="glass-panel rounded-xl p-5">
@@ -512,16 +749,49 @@ function RequestCard({
               </Button>
             </div>
           )}
-          {r.status === 'approved' && showComplete && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onComplete}
-              disabled={isCompletePending}
-            >
-              <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-              Mark Complete
-            </Button>
+          {r.status === 'approved' && showComplete && !notCompleteOpen && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onComplete}
+                disabled={isCompletePending}
+              >
+                <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                Mark Complete
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-orange-400 border-orange-400/30 hover:bg-orange-500/10"
+                onClick={() => setNotCompleteOpen(true)}
+              >
+                <AlertCircle className="h-3.5 w-3.5 mr-1" />
+                Not Completed
+              </Button>
+            </>
+          )}
+          {r.status === 'approved' && showComplete && notCompleteOpen && (
+            <div className="flex flex-col gap-2 w-56">
+              <Textarea
+                placeholder="Reason not completed..."
+                value={notCompleteReason}
+                onChange={(e) => setNotCompleteReason(e.target.value)}
+                className="text-xs min-h-[60px]"
+                autoFocus
+              />
+              <Button
+                size="sm"
+                className="bg-orange-600 hover:bg-orange-700"
+                onClick={() => { onNotComplete(notCompleteReason); setNotCompleteOpen(false); }}
+                disabled={!notCompleteReason.trim()}
+              >
+                Confirm Not Completed
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setNotCompleteOpen(false); setNotCompleteReason(''); }}>
+                Cancel
+              </Button>
+            </div>
           )}
         </div>
       </div>

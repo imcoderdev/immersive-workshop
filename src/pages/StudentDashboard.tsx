@@ -28,6 +28,7 @@ const statusStyles: Record<BookingStatus, string> = {
   approved: 'bg-success/15 text-success',
   rejected: 'bg-destructive/15 text-destructive',
   completed: 'bg-primary/15 text-primary',
+  not_completed: 'bg-orange-500/15 text-orange-400',
   cancelled: 'bg-muted text-muted-foreground',
 };
 
@@ -177,6 +178,7 @@ export default function StudentDashboard() {
                   approved: 'bg-success/15 text-success',
                   rejected: 'bg-destructive/15 text-destructive',
                   completed: 'bg-primary/15 text-primary',
+                  not_completed: 'bg-orange-500/15 text-orange-400',
                 };
                 return (
                   <div key={req.id} className="flex items-center gap-4 p-4 rounded-lg bg-muted/20 border border-border/30">

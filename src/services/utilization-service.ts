@@ -17,6 +17,14 @@ export interface CreateUtilizationInput {
   start_time: string;
   end_time: string;
   safety_acknowledged: boolean;
+  roll_number?: string;
+  branch?: string;
+  year?: number;
+  division?: string;
+  batch?: string;
+  team_name?: string;
+  team_name_other?: string;
+  permission_letter_url?: string;
 }
 
 export async function createUtilizationRequest(
@@ -51,6 +59,14 @@ export async function createUtilizationRequest(
       start_time: input.start_time,
       end_time: input.end_time,
       safety_acknowledged: input.safety_acknowledged,
+      roll_number: input.roll_number || null,
+      branch: input.branch || null,
+      year: input.year || null,
+      division: input.division || null,
+      batch: input.batch || null,
+      team_name: input.team_name || null,
+      team_name_other: input.team_name_other || null,
+      permission_letter_url: input.permission_letter_url || null,
     })
     .select()
     .single();
@@ -196,6 +212,25 @@ export async function completeUtilizationRequest(
 
   if (error) throw error;
   if (!data) throw new Error('Unable to complete — you may not have permission for this request.');
+  return data as UtilizationRequest;
+}
+
+export async function notCompleteUtilizationRequest(
+  requestId: string,
+  reason: string,
+): Promise<UtilizationRequest> {
+  const { data, error } = await supabase
+    .from('machine_utilization_requests')
+    .update({
+      status: 'not_completed' as UtilizationStatus,
+      not_completed_reason: reason,
+    })
+    .eq('id', requestId)
+    .select()
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error('Unable to mark as not completed.');
   return data as UtilizationRequest;
 }
 

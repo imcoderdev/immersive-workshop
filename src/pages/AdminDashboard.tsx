@@ -37,18 +37,26 @@ import {
   Trash2,
   ShieldCheck,
   UserCog,
+  Package,
+  ShieldAlert,
+  AlertTriangle,
+  Volume2,
 } from 'lucide-react';
 import { getAdminStats, getWeeklyUsage, getMachineUtilization } from '@/services/booking-service';
 import { getAllProfiles, getPendingTeachers, approveTeacher, rejectTeacher, updateUserRole } from '@/services/auth-service';
 import { getAllMachines, createMachine, updateMachine, deleteMachine } from '@/services/workshop-service';
 import { getAllUtilizationRequests } from '@/services/utilization-service';
+import { getAllResources, createResource, updateResource, deleteResource, getMaintenanceDueResources, markMaintenanceDone } from '@/services/resource-service';
+import { getAllSafetyModules, createSafetyModule, updateSafetyModule, deleteSafetyModule } from '@/services/safety-service';
+import { getAllToolIssueRequests } from '@/services/tool-issue-service';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { useState, useEffect, useMemo } from 'react';
-import type { Machine, Profile, UserRole, UtilizationStatus } from '@/types/database';
-import { utilizationStatusColor, WORK_TYPE_LABELS, RAW_MATERIAL_LABELS, MACHINE_CATALOG } from '@/types/database';
+import type { Machine, Profile, UserRole, UtilizationStatus, Resource, ResourceType, ResourceStatus, SafetyModule, SafetyType, ToolIssueDetail, ToolIssueStatus } from '@/types/database';
+import { utilizationStatusColor, WORK_TYPE_LABELS, RAW_MATERIAL_LABELS, MACHINE_CATALOG, RESOURCE_TYPE_LABELS, RESOURCE_STATUS_LABELS, TOOL_ISSUE_STATUS_LABELS, toolIssueStatusColor } from '@/types/database';
 import { useAuthStore } from '@/stores/auth-store';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
 
 // ─── Machine Form Modal ─────────────────────────────────────────────────────
 
@@ -260,6 +268,339 @@ function MachineFormModal({
 
 // ─── Main Admin Dashboard ────────────────────────────────────────────────────
 
+// ─── Resource Form Modal ─────────────────────────────────────────────────────
+
+interface ResourceFormState {
+  name: string;
+  resource_type: ResourceType;
+  shop_name: string;
+  quantity: string;
+  supervisor_id: string;
+  maintenance_interval_days: string;
+  status: ResourceStatus;
+  description: string;
+  department: string;
+  is_bookable: boolean;
+  max_booking_hours: number;
+}
+
+const defaultResourceForm: ResourceFormState = {
+  name: '',
+  resource_type: 'tool',
+  shop_name: '',
+  quantity: '1',
+  supervisor_id: '',
+  maintenance_interval_days: '',
+  status: 'active',
+  description: '',
+  department: '',
+  is_bookable: false,
+  max_booking_hours: 2,
+};
+
+function ResourceFormModal({
+  open,
+  onClose,
+  resource,
+  facultyList,
+  onSubmit,
+  isPending,
+}: {
+  open: boolean;
+  onClose: () => void;
+  resource: Resource | null;
+  facultyList: Profile[];
+  onSubmit: (payload: Partial<Resource>, isEdit: boolean, id?: string) => void;
+  isPending: boolean;
+}) {
+  const { toast } = useToast();
+  const isEdit = !!resource;
+  const [form, setForm] = useState<ResourceFormState>({ ...defaultResourceForm });
+
+  useEffect(() => {
+    if (open) {
+      setForm(
+        resource
+          ? {
+              name: resource.name,
+              resource_type: resource.resource_type,
+              shop_name: resource.shop_name ?? '',
+              quantity: String(resource.quantity ?? ''),
+              supervisor_id: resource.supervisor_id ?? '',
+              maintenance_interval_days: String(resource.maintenance_interval_days ?? ''),
+              status: resource.status,
+              description: resource.description ?? '',
+              department: resource.department ?? '',
+              is_bookable: resource.is_bookable,
+              max_booking_hours: resource.max_booking_hours,
+            }
+          : { ...defaultResourceForm },
+      );
+    }
+  }, [open, resource]);
+
+  const handleSubmit = () => {
+    if (!form.name) {
+      toast({ title: 'Name is required', variant: 'destructive' });
+      return;
+    }
+    const payload: Partial<Resource> = {
+      name: form.name,
+      resource_type: form.resource_type,
+      shop_name: form.shop_name || null,
+      quantity: form.quantity ? Number(form.quantity) : null,
+      supervisor_id: form.supervisor_id || null,
+      maintenance_interval_days: form.maintenance_interval_days ? Number(form.maintenance_interval_days) : null,
+      status: form.status,
+      description: form.description || null,
+      department: form.department || null,
+      is_bookable: form.is_bookable,
+      max_booking_hours: form.max_booking_hours,
+    };
+    onSubmit(payload, isEdit, resource?.id);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? 'Edit Resource' : 'Add Resource'}</DialogTitle>
+          <DialogDescription>{isEdit ? 'Update resource details.' : 'Register a new tool, device, or shop.'}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Name</label>
+              <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Type</label>
+              <Select value={form.resource_type} onValueChange={(v: ResourceType) => setForm((f) => ({ ...f, resource_type: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent className="z-[200]">
+                  {(Object.entries(RESOURCE_TYPE_LABELS) as [ResourceType, string][]).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Shop Name</label>
+              <Input value={form.shop_name} onChange={(e) => setForm((f) => ({ ...f, shop_name: e.target.value }))} placeholder="e.g. Machine Shop" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Quantity</label>
+              <Input type="number" min={0} value={form.quantity} onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Department</label>
+              <Input value={form.department} onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Maintenance Interval (days)</label>
+              <Input type="number" min={0} value={form.maintenance_interval_days} onChange={(e) => setForm((f) => ({ ...f, maintenance_interval_days: e.target.value }))} placeholder="e.g. 30" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Description</label>
+            <Textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} rows={2} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Status</label>
+              <Select value={form.status} onValueChange={(v: ResourceStatus) => setForm((f) => ({ ...f, status: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent className="z-[200]">
+                  {(Object.entries(RESOURCE_STATUS_LABELS) as [ResourceStatus, string][]).map(([k, v]) => (
+                    <SelectItem key={k} value={k}>{v}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Max Booking Hours</label>
+              <Input type="number" min={1} max={24} value={form.max_booking_hours} onChange={(e) => setForm((f) => ({ ...f, max_booking_hours: Number(e.target.value) }))} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Assign Faculty (Supervisor)</label>
+            <Select value={form.supervisor_id || '__none__'} onValueChange={(v) => setForm((f) => ({ ...f, supervisor_id: v === '__none__' ? '' : v }))}>
+              <SelectTrigger><SelectValue placeholder="Select faculty" /></SelectTrigger>
+              <SelectContent className="z-[200]">
+                <SelectItem value="__none__">None</SelectItem>
+                {facultyList.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>{f.full_name} ({f.email})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.is_bookable} onChange={(e) => setForm((f) => ({ ...f, is_bookable: e.target.checked }))} className="accent-primary" />
+            Bookable by students
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isPending}>{isPending ? 'Saving…' : isEdit ? 'Update Resource' : 'Add Resource'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Safety Form Modal ───────────────────────────────────────────────────────
+
+interface SafetyFormState {
+  title: string;
+  safety_type: SafetyType;
+  resource_id: string;
+  shop_name: string;
+  audio_url: string;
+  audio_duration_seconds: string;
+  validity_days: string;
+  active: boolean;
+}
+
+const defaultSafetyForm: SafetyFormState = {
+  title: '',
+  safety_type: 'shop',
+  resource_id: '',
+  shop_name: '',
+  audio_url: '',
+  audio_duration_seconds: '60',
+  validity_days: '30',
+  active: true,
+};
+
+function SafetyFormModal({
+  open,
+  onClose,
+  module,
+  resources,
+  onSubmit,
+  isPending,
+}: {
+  open: boolean;
+  onClose: () => void;
+  module: SafetyModule | null;
+  resources: Resource[];
+  onSubmit: (payload: Partial<SafetyModule>, isEdit: boolean, id?: string) => void;
+  isPending: boolean;
+}) {
+  const { toast } = useToast();
+  const isEdit = !!module;
+  const [form, setForm] = useState<SafetyFormState>({ ...defaultSafetyForm });
+
+  useEffect(() => {
+    if (open) {
+      setForm(
+        module
+          ? {
+              title: module.title,
+              safety_type: module.safety_type,
+              resource_id: module.resource_id ?? '',
+              shop_name: module.shop_name ?? '',
+              audio_url: module.audio_url,
+              audio_duration_seconds: String(module.audio_duration_seconds),
+              validity_days: String(module.validity_days),
+              active: module.active,
+            }
+          : { ...defaultSafetyForm },
+      );
+    }
+  }, [open, module]);
+
+  const handleSubmit = () => {
+    if (!form.title || !form.audio_url) {
+      toast({ title: 'Title and audio URL are required', variant: 'destructive' });
+      return;
+    }
+    const payload: Partial<SafetyModule> = {
+      title: form.title,
+      safety_type: form.safety_type,
+      resource_id: form.resource_id || null,
+      shop_name: form.shop_name || null,
+      audio_url: form.audio_url,
+      audio_duration_seconds: Number(form.audio_duration_seconds) || 60,
+      validity_days: Number(form.validity_days) || 30,
+      active: form.active,
+    };
+    onSubmit(payload, isEdit, module?.id);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? 'Edit Safety Module' : 'Add Safety Module'}</DialogTitle>
+          <DialogDescription>{isEdit ? 'Update safety module details.' : 'Create a new audio safety module.'}</DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-2">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Title</label>
+            <Input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="e.g. Machine Shop General Safety" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Safety Type</label>
+              <Select value={form.safety_type} onValueChange={(v: SafetyType) => setForm((f) => ({ ...f, safety_type: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent className="z-[200]">
+                  <SelectItem value="shop">Shop</SelectItem>
+                  <SelectItem value="machine">Machine</SelectItem>
+                  <SelectItem value="tool">Tool</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Shop Name</label>
+              <Input value={form.shop_name} onChange={(e) => setForm((f) => ({ ...f, shop_name: e.target.value }))} placeholder="e.g. Machine Shop" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Linked Resource (optional)</label>
+            <Select value={form.resource_id || '__none__'} onValueChange={(v) => setForm((f) => ({ ...f, resource_id: v === '__none__' ? '' : v }))}>
+              <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+              <SelectContent className="z-[200]">
+                <SelectItem value="__none__">None</SelectItem>
+                {resources.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>{r.name} ({RESOURCE_TYPE_LABELS[r.resource_type]})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Audio URL</label>
+            <Input value={form.audio_url} onChange={(e) => setForm((f) => ({ ...f, audio_url: e.target.value }))} placeholder="https://…" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Audio Duration (sec)</label>
+              <Input type="number" min={1} value={form.audio_duration_seconds} onChange={(e) => setForm((f) => ({ ...f, audio_duration_seconds: e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">Validity (days)</label>
+              <Input type="number" min={1} value={form.validity_days} onChange={(e) => setForm((f) => ({ ...f, validity_days: e.target.value }))} />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.active} onChange={(e) => setForm((f) => ({ ...f, active: e.target.checked }))} className="accent-primary" />
+            Active
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={isPending}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isPending}>{isPending ? 'Saving…' : isEdit ? 'Update Module' : 'Add Module'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function AdminDashboard() {
   const { toast } = useToast();
   const { profile: myProfile } = useAuthStore();
@@ -271,6 +612,14 @@ export default function AdminDashboard() {
   const [machineModalOpen, setMachineModalOpen] = useState(false);
   const [editingMachine, setEditingMachine] = useState<Machine | null>(null);
   const [machineSearch, setMachineSearch] = useState('');
+  // New state for resource/safety/tool tabs
+  const [resourceModalOpen, setResourceModalOpen] = useState(false);
+  const [editingResource, setEditingResource] = useState<Resource | null>(null);
+  const [resourceSearch, setResourceSearch] = useState('');
+  const [resourceTypeFilter, setResourceTypeFilter] = useState<string>('all');
+  const [safetyModalOpen, setSafetyModalOpen] = useState(false);
+  const [editingSafety, setEditingSafety] = useState<SafetyModule | null>(null);
+  const [toolIssueStatusFilter, setToolIssueStatusFilter] = useState<string>('all');
 
   // ─ Queries ──────────────────────────────────────────────────────────────────
   const { data: stats } = useQuery({ queryKey: ['admin-stats'], queryFn: getAdminStats });
@@ -280,6 +629,10 @@ export default function AdminDashboard() {
   const { data: machines = [] } = useQuery({ queryKey: ['all-machines'], queryFn: getAllMachines });
   const { data: pendingTeachers = [] } = useQuery({ queryKey: ['pending-teachers'], queryFn: getPendingTeachers });
   const { data: allUtilRequests = [] } = useQuery({ queryKey: ['admin-utilization'], queryFn: () => getAllUtilizationRequests() });
+  const { data: allResources = [] } = useQuery({ queryKey: ['resources'], queryFn: getAllResources });
+  const { data: allSafetyModules = [] } = useQuery({ queryKey: ['safety-modules'], queryFn: getAllSafetyModules });
+  const { data: allToolIssues = [] } = useQuery({ queryKey: ['tool-issues'], queryFn: () => getAllToolIssueRequests() });
+  const { data: maintenanceDue = [] } = useQuery({ queryKey: ['maintenance-due'], queryFn: getMaintenanceDueResources });
 
   const facultyList = useMemo(() => profiles.filter((p) => p.role === 'faculty'), [profiles]);
 
@@ -299,6 +652,14 @@ export default function AdminDashboard() {
   const filteredMachines = machines.filter((m) =>
     !machineSearch || m.name.toLowerCase().includes(machineSearch.toLowerCase()) || (m.shop_type ?? '').toLowerCase().includes(machineSearch.toLowerCase()),
   );
+
+  // Filtered resources
+  const filteredResources = allResources
+    .filter((r) => resourceTypeFilter === 'all' || r.resource_type === resourceTypeFilter)
+    .filter((r) => !resourceSearch || r.name.toLowerCase().includes(resourceSearch.toLowerCase()) || (r.shop_name ?? '').toLowerCase().includes(resourceSearch.toLowerCase()));
+
+  // Filtered tool issues
+  const filteredToolIssues = allToolIssues.filter((t) => toolIssueStatusFilter === 'all' || t.status === toolIssueStatusFilter);
 
   // ─ Mutations ────────────────────────────────────────────────────────────────
   const approveM = useMutation({
@@ -322,6 +683,43 @@ export default function AdminDashboard() {
   const roleM = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: UserRole }) => updateUserRole(userId, role),
     onSuccess: () => { toast({ title: 'Role updated' }); queryClient.invalidateQueries({ queryKey: ['all-profiles'] }); },
+    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
+  // ─ New mutations (resources, safety, maintenance) ───────────────────────────
+  const createResourceM = useMutation({
+    mutationFn: (payload: Partial<Resource>) => createResource(payload),
+    onSuccess: () => { toast({ title: 'Resource created' }); queryClient.invalidateQueries({ queryKey: ['resources'] }); queryClient.invalidateQueries({ queryKey: ['admin-stats'] }); setResourceModalOpen(false); setEditingResource(null); },
+    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+  const updateResourceM = useMutation({
+    mutationFn: ({ id, updates }: { id: string; updates: Partial<Resource> }) => updateResource(id, updates),
+    onSuccess: () => { toast({ title: 'Resource updated' }); queryClient.invalidateQueries({ queryKey: ['resources'] }); setResourceModalOpen(false); setEditingResource(null); },
+    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+  const deleteResourceM = useMutation({
+    mutationFn: deleteResource,
+    onSuccess: () => { toast({ title: 'Resource deleted' }); queryClient.invalidateQueries({ queryKey: ['resources'] }); queryClient.invalidateQueries({ queryKey: ['admin-stats'] }); },
+    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+  const createSafetyM = useMutation({
+    mutationFn: (payload: Partial<SafetyModule>) => createSafetyModule(payload),
+    onSuccess: () => { toast({ title: 'Safety module created' }); queryClient.invalidateQueries({ queryKey: ['safety-modules'] }); setSafetyModalOpen(false); setEditingSafety(null); },
+    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+  const updateSafetyM = useMutation({
+    mutationFn: ({ id, updates }: { id: string; updates: Partial<SafetyModule> }) => updateSafetyModule(id, updates),
+    onSuccess: () => { toast({ title: 'Safety module updated' }); queryClient.invalidateQueries({ queryKey: ['safety-modules'] }); setSafetyModalOpen(false); setEditingSafety(null); },
+    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+  const deleteSafetyM = useMutation({
+    mutationFn: deleteSafetyModule,
+    onSuccess: () => { toast({ title: 'Safety module deleted' }); queryClient.invalidateQueries({ queryKey: ['safety-modules'] }); },
+    onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+  const maintenanceDoneM = useMutation({
+    mutationFn: markMaintenanceDone,
+    onSuccess: () => { toast({ title: 'Maintenance marked done' }); queryClient.invalidateQueries({ queryKey: ['maintenance-due'] }); queryClient.invalidateQueries({ queryKey: ['resources'] }); },
     onError: (e: any) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
   });
 
@@ -367,12 +765,31 @@ export default function AdminDashboard() {
         </div>
 
         {/* ── Stats Cards ──────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           {[
             { icon: Cpu, label: 'Total Machines', value: String(stats?.total_machines ?? machines.length) },
+            { icon: Package, label: 'Tools / Devices', value: String(stats?.total_tools ?? allResources.filter((r) => r.resource_type === 'tool' || r.resource_type === 'device').length) },
             { icon: Users, label: 'Active Students', value: String(profiles.filter((p) => p.role === 'student').length) },
-            { icon: TrendingUp, label: 'Pending Requests', value: String(allUtilRequests.filter((r) => r.status === 'pending').length) },
             { icon: Calendar, label: 'Bookings Today', value: String(stats?.bookings_today ?? '-') },
+          ].map((stat) => (
+            <div key={stat.label} className="glass-panel rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center">
+                  <stat.icon className="h-4 w-4 text-primary" />
+                </div>
+                <Activity className="h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+              <div className="text-2xl font-bold">{stat.value}</div>
+              <div className="text-xs text-muted-foreground">{stat.label}</div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          {[
+            { icon: TrendingUp, label: 'Pending Requests', value: String(allUtilRequests.filter((r) => r.status === 'pending').length) },
+            { icon: ShieldAlert, label: 'Pending Tool Issues', value: String(stats?.pending_tool_issues ?? allToolIssues.filter((t) => t.status === 'pending').length) },
+            { icon: AlertTriangle, label: 'Maintenance Due', value: String(stats?.maintenance_due ?? maintenanceDue.length) },
+            { icon: ShieldCheck, label: 'Safety Modules', value: String(allSafetyModules.length) },
           ].map((stat) => (
             <div key={stat.label} className="glass-panel rounded-xl p-5">
               <div className="flex items-center justify-between mb-3">
@@ -425,8 +842,22 @@ export default function AdminDashboard() {
 
         {/* ── Tabs ─────────────────────────────────────────────────────────── */}
         <Tabs defaultValue="machines" className="space-y-6">
-          <TabsList className="bg-muted/30 border border-border/30">
+          <TabsList className="bg-muted/30 border border-border/30 flex-wrap h-auto">
             <TabsTrigger value="machines"><Cpu className="h-4 w-4 mr-1.5" />Machines</TabsTrigger>
+            <TabsTrigger value="resources"><Package className="h-4 w-4 mr-1.5" />Resources</TabsTrigger>
+            <TabsTrigger value="safety"><ShieldAlert className="h-4 w-4 mr-1.5" />Safety</TabsTrigger>
+            <TabsTrigger value="tool_issues">
+              <Wrench className="h-4 w-4 mr-1.5" />Tool Issues
+              {allToolIssues.filter((t) => t.status === 'pending').length > 0 && (
+                <Badge variant="destructive" className="ml-1.5 h-5 px-1.5 text-[10px]">{allToolIssues.filter((t) => t.status === 'pending').length}</Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="maintenance">
+              <AlertTriangle className="h-4 w-4 mr-1.5" />Maintenance
+              {maintenanceDue.length > 0 && (
+                <Badge variant="destructive" className="ml-1.5 h-5 px-1.5 text-[10px]">{maintenanceDue.length}</Badge>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="users"><UserCog className="h-4 w-4 mr-1.5" />Users</TabsTrigger>
             <TabsTrigger value="utilization"><Wrench className="h-4 w-4 mr-1.5" />Utilization</TabsTrigger>
             <TabsTrigger value="analytics"><TrendingUp className="h-4 w-4 mr-1.5" />Analytics</TabsTrigger>
@@ -501,6 +932,248 @@ export default function AdminDashboard() {
               machine={editingMachine}
               facultyList={facultyList}
             />
+          </TabsContent>
+
+          {/* ═══════════════ RESOURCES TAB ═══════════════ */}
+          <TabsContent value="resources">
+            <div className="glass-panel rounded-xl p-6">
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <h2 className="text-base font-semibold">Resource Management ({filteredResources.length})</h2>
+                <div className="flex items-center gap-2">
+                  <Input placeholder="Search resources…" value={resourceSearch} onChange={(e) => setResourceSearch(e.target.value)} className="w-48 h-8 text-xs" />
+                  <Select value={resourceTypeFilter} onValueChange={setResourceTypeFilter}>
+                    <SelectTrigger className="w-32 h-8 text-xs"><Filter className="h-3 w-3 mr-1" /><SelectValue /></SelectTrigger>
+                    <SelectContent className="z-[70]">
+                      <SelectItem value="all">All Types</SelectItem>
+                      {(Object.entries(RESOURCE_TYPE_LABELS) as [ResourceType, string][]).map(([k, v]) => (
+                        <SelectItem key={k} value={k}>{v}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" onClick={() => { setEditingResource(null); setResourceModalOpen(true); }}>
+                    <Plus className="h-3.5 w-3.5 mr-1" />Add Resource
+                  </Button>
+                </div>
+              </div>
+
+              {filteredResources.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No resources found.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border/30">
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Name</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Type</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Shop</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Qty</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Supervisor</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Status</th>
+                        <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredResources.map((r) => (
+                        <tr key={r.id} className="border-b border-border/10 hover:bg-muted/10">
+                          <td className="py-2.5 px-3 font-medium text-xs">{r.name}</td>
+                          <td className="py-2.5 px-3"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground capitalize">{RESOURCE_TYPE_LABELS[r.resource_type]}</span></td>
+                          <td className="py-2.5 px-3 text-xs text-muted-foreground">{r.shop_name ?? '—'}</td>
+                          <td className="py-2.5 px-3 text-xs">{r.quantity ?? '—'}</td>
+                          <td className="py-2.5 px-3 text-xs">{r.supervisor_id ? facultyMap.get(r.supervisor_id) ?? 'Unknown' : <span className="text-muted-foreground">Unassigned</span>}</td>
+                          <td className="py-2.5 px-3"><span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', r.status === 'active' ? 'bg-success/15 text-success' : r.status === 'maintenance_required' ? 'bg-destructive/15 text-destructive' : 'bg-muted text-muted-foreground')}>{RESOURCE_STATUS_LABELS[r.status]}</span></td>
+                          <td className="py-2.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => { setEditingResource(r); setResourceModalOpen(true); }}><Pencil className="h-3.5 w-3.5" /></Button>
+                              <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => { if (confirm(`Delete "${r.name}"?`)) deleteResourceM.mutate(r.id); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* ─── Resource Form Modal ─── */}
+            <ResourceFormModal
+              open={resourceModalOpen}
+              onClose={() => { setResourceModalOpen(false); setEditingResource(null); }}
+              resource={editingResource}
+              facultyList={facultyList}
+              onSubmit={(payload, isEdit, id) => {
+                if (isEdit && id) {
+                  updateResourceM.mutate({ id, updates: payload });
+                } else {
+                  createResourceM.mutate(payload);
+                }
+              }}
+              isPending={createResourceM.isPending || updateResourceM.isPending}
+            />
+          </TabsContent>
+
+          {/* ═══════════════ SAFETY TAB ═══════════════ */}
+          <TabsContent value="safety">
+            <div className="glass-panel rounded-xl p-6">
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <h2 className="text-base font-semibold">Safety Module Management ({allSafetyModules.length})</h2>
+                <Button size="sm" onClick={() => { setEditingSafety(null); setSafetyModalOpen(true); }}>
+                  <Plus className="h-3.5 w-3.5 mr-1" />Add Module
+                </Button>
+              </div>
+
+              {allSafetyModules.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No safety modules configured.</p>
+              ) : (
+                <div className="space-y-3">
+                  {allSafetyModules.map((mod) => (
+                    <div key={mod.id} className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-border/30">
+                      <div className="flex items-center gap-3">
+                        <div className={cn('h-10 w-10 rounded-full flex items-center justify-center', mod.active ? 'bg-success/15' : 'bg-muted/30')}>
+                          <Volume2 className={cn('h-4 w-4', mod.active ? 'text-success' : 'text-muted-foreground')} />
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold">{mod.title}</div>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                            <span className="capitalize">{mod.safety_type} safety</span>
+                            <span>·</span>
+                            <span>{mod.audio_duration_seconds}s audio</span>
+                            <span>·</span>
+                            <span>Valid {mod.validity_days} days</span>
+                            {mod.shop_name && <><span>·</span><span>Shop: {mod.shop_name}</span></>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', mod.active ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground')}>
+                          {mod.active ? 'Active' : 'Inactive'}
+                        </span>
+                        <Button variant="ghost" size="sm" onClick={() => { setEditingSafety(mod); setSafetyModalOpen(true); }}><Pencil className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => { if (confirm(`Delete "${mod.title}"?`)) deleteSafetyM.mutate(mod.id); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ─── Safety Form Modal ─── */}
+            <SafetyFormModal
+              open={safetyModalOpen}
+              onClose={() => { setSafetyModalOpen(false); setEditingSafety(null); }}
+              module={editingSafety}
+              resources={allResources}
+              onSubmit={(payload, isEdit, id) => {
+                if (isEdit && id) {
+                  updateSafetyM.mutate({ id, updates: payload });
+                } else {
+                  createSafetyM.mutate(payload);
+                }
+              }}
+              isPending={createSafetyM.isPending || updateSafetyM.isPending}
+            />
+          </TabsContent>
+
+          {/* ═══════════════ TOOL ISSUES TAB ═══════════════ */}
+          <TabsContent value="tool_issues">
+            <div className="glass-panel rounded-xl p-6">
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <h2 className="text-base font-semibold">Tool Issue Requests ({filteredToolIssues.length})</h2>
+                <Select value={toolIssueStatusFilter} onValueChange={setToolIssueStatusFilter}>
+                  <SelectTrigger className="w-36 h-8 text-xs"><Filter className="h-3 w-3 mr-1" /><SelectValue /></SelectTrigger>
+                  <SelectContent className="z-[70]">
+                    <SelectItem value="all">All statuses</SelectItem>
+                    {(Object.entries(TOOL_ISSUE_STATUS_LABELS) as [ToolIssueStatus, string][]).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {filteredToolIssues.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No tool issue requests found.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border/30">
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Student</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Resource</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Type</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Qty</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Requested</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Issued</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Returned</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredToolIssues.slice(0, 100).map((t) => (
+                        <tr key={t.id} className="border-b border-border/10 hover:bg-muted/10">
+                          <td className="py-2.5 px-3">
+                            <div className="font-medium text-xs">{t.user_name}</div>
+                            <div className="text-xs text-muted-foreground">{t.user_department ?? ''}</div>
+                          </td>
+                          <td className="py-2.5 px-3 text-xs">{t.resource_name}</td>
+                          <td className="py-2.5 px-3"><span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground capitalize">{RESOURCE_TYPE_LABELS[t.resource_type]}</span></td>
+                          <td className="py-2.5 px-3 text-xs">{t.quantity_requested}</td>
+                          <td className="py-2.5 px-3 text-xs">{format(new Date(t.requested_at), 'MMM d, HH:mm')}</td>
+                          <td className="py-2.5 px-3 text-xs">{t.issue_time ? format(new Date(t.issue_time), 'MMM d, HH:mm') : '—'}</td>
+                          <td className="py-2.5 px-3 text-xs">{t.return_time ? format(new Date(t.return_time), 'MMM d, HH:mm') : '—'}</td>
+                          <td className="py-2.5 px-3">
+                            <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium', toolIssueStatusColor(t.status))}>
+                              {TOOL_ISSUE_STATUS_LABELS[t.status]}
+                            </span>
+                            {t.rejection_reason && <div className="text-xs text-destructive mt-0.5 max-w-[180px] truncate" title={t.rejection_reason}>{t.rejection_reason}</div>}
+                            {t.condition_on_return && <div className="text-xs text-muted-foreground mt-0.5">Condition: {t.condition_on_return}</div>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* ═══════════════ MAINTENANCE TAB ═══════════════ */}
+          <TabsContent value="maintenance">
+            <div className="glass-panel rounded-xl p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <AlertTriangle className="h-5 w-5 text-amber-400" />
+                <h2 className="text-base font-semibold">Maintenance Due ({maintenanceDue.length})</h2>
+              </div>
+
+              {maintenanceDue.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No maintenance overdue. All resources are up to date.</p>
+              ) : (
+                <div className="space-y-3">
+                  {maintenanceDue.map((r) => (
+                    <div key={r.id} className="flex items-center justify-between p-4 rounded-lg bg-muted/20 border border-amber-500/20">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-amber-500/15 flex items-center justify-center">
+                          <Wrench className="h-4 w-4 text-amber-400" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-semibold">{r.name}</div>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                            <span className="capitalize">{RESOURCE_TYPE_LABELS[r.resource_type]}</span>
+                            {r.shop_name && <><span>·</span><span>{r.shop_name}</span></>}
+                            <span>·</span>
+                            <span>Last: {r.last_maintenance_date ? format(new Date(r.last_maintenance_date), 'MMM d, yyyy') : 'Never'}</span>
+                            <span>·</span>
+                            <span className="text-amber-400">Due: {r.next_maintenance_due ? format(new Date(r.next_maintenance_due), 'MMM d, yyyy') : '—'}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <Button size="sm" variant="outline" className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10" onClick={() => maintenanceDoneM.mutate(r.id)} disabled={maintenanceDoneM.isPending}>
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" />Mark Done
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </TabsContent>
 
           {/* ═══════════════ USERS TAB ═══════════════ */}
