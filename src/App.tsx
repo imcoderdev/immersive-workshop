@@ -18,6 +18,7 @@ import StudentDashboard from "./pages/StudentDashboard";
 import FacultyDashboard from "./pages/FacultyDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import UtilizationForm from "./pages/UtilizationForm";
+import PracticalModule from "./pages/PracticalModule";
 import NotFound from "./pages/NotFound";
 import { useRealtimeInvalidation } from "./hooks/use-realtime";
 
@@ -89,6 +90,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <UtilizationForm />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/practical"
+              element={
+                <ProtectedRoute>
+                  <PracticalModule />
                 </ProtectedRoute>
               }
             />

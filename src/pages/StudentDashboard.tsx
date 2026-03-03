@@ -1,5 +1,14 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import {
   Calendar,
@@ -13,15 +22,19 @@ import {
   XCircle,
   Cpu,
   Wrench,
+  Package,
+  BookOpen,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { getUserBookings, getUserSafetyAcknowledgements, cancelBooking } from '@/services/booking-service';
 import { getUserUtilizationRequests } from '@/services/utilization-service';
+import { getUserToolIssueRequests, createToolIssueRequest } from '@/services/tool-issue-service';
+import { getResourcesByType } from '@/services/resource-service';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
-import type { BookingDetail, BookingStatus, UtilizationRequestDetail, UtilizationStatus } from '@/types/database';
-import { WORK_TYPE_LABELS, utilizationStatusColor } from '@/types/database';
+import type { BookingDetail, BookingStatus, UtilizationRequestDetail, UtilizationStatus, ToolIssueDetail, ToolIssueStatus, Resource } from '@/types/database';
+import { WORK_TYPE_LABELS, utilizationStatusColor, toolIssueStatusColor, TOOL_ISSUE_STATUS_LABELS, RESOURCE_TYPE_LABELS } from '@/types/database';
 
 const statusStyles: Record<BookingStatus, string> = {
   pending: 'bg-warning/15 text-warning',
@@ -49,6 +62,10 @@ function StatCard({ icon: Icon, label, value, accent }: { icon: any; label: stri
 export default function StudentDashboard() {
   const { profile } = useAuthStore();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const [toolResourceId, setToolResourceId] = useState('');
+  const [toolQuantity, setToolQuantity] = useState('1');
 
   const { data: bookings = [], refetch: refetchBookings } = useQuery({
     queryKey: ['user-bookings'],
@@ -65,8 +82,21 @@ export default function StudentDashboard() {
     queryFn: getUserUtilizationRequests,
   });
 
+  const { data: toolIssueRequests = [] } = useQuery({
+    queryKey: ['user-tool-issues'],
+    queryFn: getUserToolIssueRequests,
+  });
+
+  // Tools available for request
+  const { data: availableTools = [] } = useQuery({
+    queryKey: ['resources', 'tool'],
+    queryFn: () => getResourcesByType('tool'),
+  });
+
   const activeBookings = bookings.filter((b) => b.status === 'approved' || b.status === 'pending');
   const upcomingBookings = bookings.filter((b) => ['pending', 'approved'].includes(b.status) && new Date(b.date) >= new Date()).slice(0, 5);
+
+  const isFirstYear = profile?.year === 1;
 
   const handleCancel = async (id: string) => {
     try {
@@ -77,6 +107,22 @@ export default function StudentDashboard() {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
     }
   };
+
+  const toolRequestMut = useMutation({
+    mutationFn: () =>
+      createToolIssueRequest({
+        resource_id: toolResourceId,
+        quantity_requested: Number(toolQuantity) || 1,
+      }),
+    onSuccess: () => {
+      toast({ title: 'Tool request submitted' });
+      queryClient.invalidateQueries({ queryKey: ['user-tool-issues'] });
+      setToolResourceId('');
+      setToolQuantity('1');
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
 
   return (
     <div className="min-h-screen pt-20 pb-12">
@@ -89,12 +135,16 @@ export default function StudentDashboard() {
         <div className="flex flex-wrap gap-3 mb-8">
           <Button size="sm" asChild><Link to="/workshop"><Compass className="h-4 w-4 mr-1" />Explore Workshop</Link></Button>
           <Button variant="outline" size="sm" asChild><Link to="/utilize"><Wrench className="h-4 w-4 mr-1" />New Utilization Request</Link></Button>
+          {isFirstYear && (
+            <Button variant="outline" size="sm" asChild><Link to="/practical"><BookOpen className="h-4 w-4 mr-1" />Practical Attendance</Link></Button>
+          )}
           <Button variant="outline" size="sm"><Settings className="h-4 w-4 mr-1" />Account Settings</Button>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard icon={Calendar} label="Active Bookings" value={activeBookings.length} />
           <StatCard icon={Wrench} label="Utilization Requests" value={utilizationRequests.length} />
+          <StatCard icon={Package} label="Tool Requests" value={toolIssueRequests.length} />
           <StatCard icon={Shield} label="Safety Cleared" value={safetyRecords.length} />
         </div>
 
@@ -201,6 +251,67 @@ export default function StudentDashboard() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+
+        {/* Tool Issue Requests */}
+        <div className="glass-panel rounded-xl p-6 mt-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-base font-semibold">Tool / Device Requests</h2>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </div>
+
+          {/* Request Form */}
+          <div className="flex flex-wrap items-end gap-3 mb-5 p-4 rounded-lg bg-muted/20 border border-border/30">
+            <div className="flex-1 min-w-[200px]">
+              <label className="text-xs text-muted-foreground mb-1 block">Tool / Device</label>
+              <Select value={toolResourceId} onValueChange={setToolResourceId}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="Select tool…" />
+                </SelectTrigger>
+                <SelectContent className="z-[70]">
+                  {availableTools.filter((t) => t.status === 'active').map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name} {t.quantity != null ? `(${t.quantity} avail.)` : ''} {t.shop_name ? `— ${t.shop_name}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="w-24">
+              <label className="text-xs text-muted-foreground mb-1 block">Qty</label>
+              <Input type="number" min={1} value={toolQuantity} onChange={(e) => setToolQuantity(e.target.value)} className="h-9 text-xs" />
+            </div>
+            <Button size="sm" disabled={!toolResourceId || toolRequestMut.isPending} onClick={() => toolRequestMut.mutate()}>
+              {toolRequestMut.isPending ? 'Submitting…' : 'Request Tool'}
+            </Button>
+          </div>
+
+          {toolIssueRequests.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No tool requests yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {toolIssueRequests.slice(0, 10).map((req) => (
+                <div key={req.id} className="flex items-center gap-4 p-4 rounded-lg bg-muted/20 border border-border/30">
+                  <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                    <Package className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{req.resource_name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Qty: {req.quantity_requested} · {format(new Date(req.requested_at), 'MMM d, HH:mm')}
+                      {req.issue_time && ` · Issued: ${format(new Date(req.issue_time), 'MMM d, HH:mm')}`}
+                      {req.return_time && ` · Returned: ${format(new Date(req.return_time), 'MMM d, HH:mm')}`}
+                    </div>
+                    {req.rejection_reason && <div className="text-xs text-destructive mt-0.5">Reason: {req.rejection_reason}</div>}
+                    {req.condition_on_return && <div className="text-xs text-muted-foreground mt-0.5">Return condition: {req.condition_on_return}</div>}
+                  </div>
+                  <span className={cn('inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium shrink-0', toolIssueStatusColor(req.status))}>
+                    {TOOL_ISSUE_STATUS_LABELS[req.status]}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>

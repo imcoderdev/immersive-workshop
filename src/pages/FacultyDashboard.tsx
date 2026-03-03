@@ -45,12 +45,21 @@ import {
   returnTool,
 } from '@/services/tool-issue-service';
 import { getMaintenanceDueResources, markMaintenanceDone } from '@/services/resource-service';
+import {
+  getFacultyPracticalSessions,
+  createPracticalSession,
+  endPracticalSession,
+  getSessionAttendance,
+} from '@/services/practical-service';
+import { getShops } from '@/services/resource-service';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
 import type {
   UtilizationRequestDetail,
   UtilizationStatus,
   ToolIssueDetail,
+  PracticalSessionDetail,
+  PracticalAttendance,
 } from '@/types/database';
 import {
   utilizationStatusColor,
@@ -62,7 +71,7 @@ import {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TabId = 'pending' | 'schedule' | 'machines' | 'tool_issues' | 'maintenance';
+type TabId = 'pending' | 'schedule' | 'machines' | 'tool_issues' | 'maintenance' | 'practicals';
 
 const STATUS_ICON: Record<UtilizationStatus, typeof Clock> = {
   pending: Clock,
@@ -90,6 +99,10 @@ export default function FacultyDashboard() {
   const [filterDate, setFilterDate] = useState('');
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  // Practical session state
+  const [practicalFormOpen, setPracticalFormOpen] = useState(false);
+  const [practicalForm, setPracticalForm] = useState({ shop_resource_id: '', division: '', batch: '', topic: '', date: format(new Date(), 'yyyy-MM-dd') });
+  const [viewAttendanceId, setViewAttendanceId] = useState<string | null>(null);
 
   // ─── Queries ───────────────────────────────────────────────────────────────
 
@@ -119,6 +132,27 @@ export default function FacultyDashboard() {
     queryKey: ['maintenance-due'],
     queryFn: getMaintenanceDueResources,
   });
+
+  // Practical sessions for this faculty
+  const { data: practicalSessions = [] } = useQuery({
+    queryKey: ['faculty-practicals'],
+    queryFn: getFacultyPracticalSessions,
+  });
+
+  // Shops for practical session creation
+  const { data: shops = [] } = useQuery({
+    queryKey: ['shops'],
+    queryFn: getShops,
+  });
+
+  // Attendance for selected session
+  const { data: sessionAttendance = [] } = useQuery({
+    queryKey: ['practical-attendance', viewAttendanceId],
+    queryFn: () => getSessionAttendance(viewAttendanceId!),
+    enabled: !!viewAttendanceId,
+  });
+
+  const activePracticals = practicalSessions.filter((s) => s.active_status);
 
   const pendingToolIssues = toolIssueRequests.filter((t) => t.status === 'pending');
 
@@ -266,6 +300,28 @@ export default function FacultyDashboard() {
       toast({ title: 'Error', description: e.message, variant: 'destructive' }),
   });
 
+  const createPracticalMut = useMutation({
+    mutationFn: (payload: Parameters<typeof createPracticalSession>[0]) => createPracticalSession(payload),
+    onSuccess: () => {
+      toast({ title: 'Practical session created' });
+      queryClient.invalidateQueries({ queryKey: ['faculty-practicals'] });
+      setPracticalFormOpen(false);
+      setPracticalForm({ shop_resource_id: '', division: '', batch: '', topic: '', date: format(new Date(), 'yyyy-MM-dd') });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
+  const endPracticalMut = useMutation({
+    mutationFn: endPracticalSession,
+    onSuccess: () => {
+      toast({ title: 'Session ended' });
+      queryClient.invalidateQueries({ queryKey: ['faculty-practicals'] });
+    },
+    onError: (e: Error) =>
+      toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+  });
+
   const handleConfirmReject = (id: string) => {
     if (rejectReason.trim()) {
       rejectMut.mutate({ id, reason: rejectReason });
@@ -312,6 +368,7 @@ export default function FacultyDashboard() {
             { id: 'tool_issues' as TabId, label: 'Tool Issues', count: pendingToolIssues.length },
             { id: 'machines' as TabId, label: 'My Machines', count: myMachines.length },
             { id: 'maintenance' as TabId, label: 'Maintenance', count: maintenanceDue.length },
+            { id: 'practicals' as TabId, label: 'Practicals', count: activePracticals.length },
           ]).map((tab) => (
             <button
               key={tab.id}
@@ -583,6 +640,117 @@ export default function FacultyDashboard() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Practicals tab ──────────────────────────────────────────────── */}
+        {activeTab === 'practicals' && (
+          <div className="space-y-6">
+            {/* Create session form */}
+            {!practicalFormOpen ? (
+              <Button size="sm" onClick={() => setPracticalFormOpen(true)}>
+                <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Create Practical Session
+              </Button>
+            ) : (
+              <div className="glass-panel rounded-xl p-5 space-y-4">
+                <h3 className="text-sm font-semibold">New Practical Session</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Shop</label>
+                    <Select value={practicalForm.shop_resource_id} onValueChange={(v) => setPracticalForm((f) => ({ ...f, shop_resource_id: v }))}>
+                      <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select shop" /></SelectTrigger>
+                      <SelectContent className="z-[70]">
+                        {shops.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Division</label>
+                    <Input value={practicalForm.division} onChange={(e) => setPracticalForm((f) => ({ ...f, division: e.target.value }))} className="h-9 text-xs" placeholder="e.g. A" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Batch</label>
+                    <Input value={practicalForm.batch} onChange={(e) => setPracticalForm((f) => ({ ...f, batch: e.target.value }))} className="h-9 text-xs" placeholder="e.g. B1" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Topic</label>
+                    <Input value={practicalForm.topic} onChange={(e) => setPracticalForm((f) => ({ ...f, topic: e.target.value }))} className="h-9 text-xs" placeholder="Practical topic" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Date</label>
+                    <Input type="date" value={practicalForm.date} onChange={(e) => setPracticalForm((f) => ({ ...f, date: e.target.value }))} className="h-9 text-xs" />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => createPracticalMut.mutate(practicalForm)} disabled={createPracticalMut.isPending || !practicalForm.shop_resource_id || !practicalForm.division || !practicalForm.batch || !practicalForm.topic}>
+                    {createPracticalMut.isPending ? 'Creating…' : 'Create Session'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setPracticalFormOpen(false)}>Cancel</Button>
+                </div>
+              </div>
+            )}
+
+            {/* Sessions list */}
+            {practicalSessions.length === 0 ? (
+              <div className="text-center py-16">
+                <Calendar className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                <p className="text-sm text-muted-foreground">No practical sessions created yet.</p>
+              </div>
+            ) : (
+              practicalSessions.map((s) => (
+                <div key={s.id} className="glass-panel rounded-xl p-5">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold">{s.topic}</h3>
+                        <Badge variant="outline" className={cn('text-xs', s.active_status ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground')}>
+                          {s.active_status ? 'Active' : 'Ended'}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground flex-wrap">
+                        <span>{s.shop_name ?? s.shop_label}</span>
+                        <span>·</span>
+                        <span>Div: {s.division} / Batch: {s.batch}</span>
+                        <span>·</span>
+                        <span>{format(new Date(s.date), 'MMM d, yyyy')}</span>
+                        <span>·</span>
+                        <span>Attendance: {s.attendance_count}</span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      {s.active_status && (
+                        <Button size="sm" variant="outline" className="text-destructive border-destructive/30" onClick={() => endPracticalMut.mutate(s.id)} disabled={endPracticalMut.isPending}>
+                          End Session
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => setViewAttendanceId(viewAttendanceId === s.id ? null : s.id)}>
+                        {viewAttendanceId === s.id ? 'Hide' : 'View'} Attendance
+                      </Button>
+                    </div>
+                  </div>
+
+                  {viewAttendanceId === s.id && (
+                    <div className="mt-4 border-t border-border/30 pt-4">
+                      {sessionAttendance.length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4">No attendance records yet.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {sessionAttendance.map((a, i) => (
+                            <div key={a.id} className="flex items-center justify-between p-2 rounded bg-muted/20 text-xs">
+                              <span className="font-medium">#{i + 1} — User: {a.user_id.slice(0, 8)}…</span>
+                              <span className="text-muted-foreground">{format(new Date(a.timestamp), 'HH:mm:ss')}</span>
+                              {a.optional_comment && <span className="text-muted-foreground italic ml-2">"{a.optional_comment}"</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
             )}
           </div>
         )}

@@ -53,7 +53,7 @@ import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { useState, useEffect, useMemo } from 'react';
 import type { Machine, Profile, UserRole, UtilizationStatus, Resource, ResourceType, ResourceStatus, SafetyModule, SafetyType, ToolIssueDetail, ToolIssueStatus } from '@/types/database';
-import { utilizationStatusColor, WORK_TYPE_LABELS, RAW_MATERIAL_LABELS, MACHINE_CATALOG, RESOURCE_TYPE_LABELS, RESOURCE_STATUS_LABELS, TOOL_ISSUE_STATUS_LABELS, toolIssueStatusColor } from '@/types/database';
+import { utilizationStatusColor, WORK_TYPE_LABELS, RAW_MATERIAL_LABELS, MACHINE_CATALOG, RESOURCE_TYPE_LABELS, RESOURCE_STATUS_LABELS, TOOL_ISSUE_STATUS_LABELS, toolIssueStatusColor, BRANCH_LABELS, StudentBranch } from '@/types/database';
 import { useAuthStore } from '@/stores/auth-store';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -598,6 +598,58 @@ function SafetyFormModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ─── Branch Distribution Chart ──────────────────────────────────────── */
+
+const BRANCH_COLORS = [
+  'bg-blue-500','bg-emerald-500','bg-amber-500','bg-purple-500','bg-rose-500',
+  'bg-cyan-500','bg-orange-500','bg-indigo-500','bg-teal-500','bg-pink-500',
+];
+
+function BranchDistributionChart({ profiles, allUtilRequests }: { profiles: Profile[]; allUtilRequests: any[] }) {
+  const branchCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    // Count utilization requests per branch using profiles lookup
+    const profileMap = new Map(profiles.map(p => [p.id, p]));
+    for (const req of allUtilRequests) {
+      const branch = req.branch || profileMap.get(req.user_id)?.branch;
+      if (branch) counts[branch] = (counts[branch] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([branch, count], i) => ({
+        branch: branch as StudentBranch,
+        label: BRANCH_LABELS[branch as StudentBranch] || branch,
+        count,
+        color: BRANCH_COLORS[i % BRANCH_COLORS.length],
+      }));
+  }, [profiles, allUtilRequests]);
+
+  const maxCount = Math.max(...branchCounts.map(b => b.count), 1);
+
+  return (
+    <div className="glass-panel rounded-xl p-6">
+      <h2 className="text-base font-semibold mb-5">Branch-wise Usage Distribution</h2>
+      {branchCounts.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-8">No usage data yet.</p>
+      ) : (
+        <div className="space-y-3">
+          {branchCounts.map((b) => (
+            <div key={b.branch}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium truncate pr-4">{b.label}</span>
+                <span className="text-xs text-muted-foreground shrink-0">{b.count} requests</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
+                <div className={cn('h-full rounded-full transition-all duration-700', b.color)} style={{ width: `${(b.count / maxCount) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1375,6 +1427,30 @@ export default function AdminDashboard() {
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* Branch-wise Usage Distribution */}
+              <BranchDistributionChart profiles={profiles} allUtilRequests={allUtilRequests} />
+
+              {/* Resource Availability vs Total */}
+              <div className="glass-panel rounded-xl p-6">
+                <h2 className="text-base font-semibold mb-5">Resource Overview</h2>
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { label: 'Machines', value: stats?.total_machines ?? 0, color: 'from-primary to-secondary' },
+                    { label: 'Tools', value: stats?.total_tools ?? 0, color: 'from-blue-500 to-cyan-400' },
+                    { label: 'Shops', value: stats?.total_shops ?? 0, color: 'from-amber-500 to-orange-400' },
+                    { label: 'Maintenance Due', value: stats?.maintenance_due ?? maintenanceDue.length, color: 'from-red-500 to-rose-400' },
+                  ].map((item) => (
+                    <div key={item.label} className="text-center p-4 rounded-lg bg-muted/20">
+                      <div className="text-2xl font-bold">{item.value}</div>
+                      <div className="text-xs text-muted-foreground mt-1">{item.label}</div>
+                      <div className="h-1.5 rounded-full bg-muted/30 overflow-hidden mt-2">
+                        <div className={cn('h-full rounded-full bg-gradient-to-r', item.color)} style={{ width: `${Math.min(Number(item.value) * 10, 100)}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </TabsContent>
