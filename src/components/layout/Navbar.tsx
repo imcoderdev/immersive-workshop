@@ -35,6 +35,7 @@ export function Navbar() {
     ? [
         { label: "Workshop", href: "/workshop" },
         { label: "Dashboard", href: getDashboardPath(profile?.role) },
+        ...(profile?.role === 'student' ? [{ label: "Profile", href: "/profile" }] : []),
       ]
     : publicLinks;
 

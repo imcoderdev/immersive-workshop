@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -12,19 +12,17 @@ import {
   Shield,
   CheckCircle2,
   AlertTriangle,
-  FileText,
   Cpu,
   Loader2,
   Info,
   Upload,
+  Search,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -37,46 +35,52 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth-store';
 import { useToast } from '@/hooks/use-toast';
-import { getMachineById, getMachineByName } from '@/services/workshop-service';
+import { getAllMachines, getMachineById } from '@/services/workshop-service';
 import {
   createUtilizationRequest,
   checkRecentSafetyAcknowledgement,
 } from '@/services/utilization-service';
 import { acknowledgeSafety } from '@/services/booking-service';
-import type { WorkType, RawMaterialSource, StudentBranch, TeamName } from '@/types/database';
-import {
-  WORK_TYPE_LABELS,
-  RAW_MATERIAL_LABELS,
-  MACHINE_CATALOG,
-  BRANCH_LABELS,
-  TEAM_LABELS,
-} from '@/types/database';
+import SafetyAudioPlayer from '@/components/safety/SafetyAudioPlayer';
+import type { Machine, TeamName } from '@/types/database';
+import { TEAM_LABELS } from '@/types/database';
+import { isProfileComplete } from '@/pages/StudentProfile';
+import { supabase } from '@/lib/supabase';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const WORK_TYPE_OPTIONS = [
+  { value: 'final_year_project', label: 'Final Year Project' },
+  { value: 'team_project', label: 'Team Project' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+const MATERIAL_OPTIONS = [
+  { value: 'self_purchased', label: 'Own' },
+  { value: 'workshop_provided', label: 'Workshop' },
+] as const;
+
+type FormWorkType = 'final_year_project' | 'team_project' | 'other';
 
 // ─── Zod Schema ───────────────────────────────────────────────────────────────
 
 const utilizationSchema = z
   .object({
-    roll_number: z.string().min(1, 'Roll number is required'),
-    branch: z.string().min(1, 'Branch is required'),
-    year: z.coerce.number().min(1).max(4, 'Year must be 1-4'),
-    division: z.string().min(1, 'Division is required'),
-    batch: z.string().min(1, 'Batch is required'),
-    work_type: z.enum(['first_year_practical', 'team_project', 'final_year_project', 'academic_event', 'other'], {
+    work_type: z.enum(['final_year_project', 'team_project', 'other'], {
       required_error: 'Select a work type',
     }),
+    // Final Year Project
+    team_name_text: z.string().optional(),
+    // Team Project
+    team_selection: z.string().optional(),
+    // Material source (FYP + Team)
+    material_source: z.enum(['self_purchased', 'workshop_provided']).optional(),
+    // Other
     work_description: z.string().optional(),
-    raw_material_source: z.enum(['workshop_provided', 'self_purchased'], {
-      required_error: 'Select raw material source',
-    }),
+    // Time slot
     date: z.date({ required_error: 'Select a date' }),
     start_time: z.string().min(1, 'Start time is required'),
     end_time: z.string().min(1, 'End time is required'),
-    safety_acknowledged: z.literal(true, {
-      errorMap: () => ({ message: 'You must acknowledge safety rules' }),
-    }),
-    team_name: z.string().optional(),
-    team_name_other: z.string().optional(),
-    permission_letter_url: z.string().optional(),
   })
   .refine((d) => d.end_time > d.start_time, {
     message: 'End time must be after start time',
@@ -84,24 +88,32 @@ const utilizationSchema = z
   })
   .refine(
     (d) => {
+      if (d.work_type === 'final_year_project') return !!d.team_name_text?.trim();
+      return true;
+    },
+    { message: 'Team name is required', path: ['team_name_text'] },
+  )
+  .refine(
+    (d) => {
+      if (d.work_type === 'team_project') return !!d.team_selection;
+      return true;
+    },
+    { message: 'Select a team', path: ['team_selection'] },
+  )
+  .refine(
+    (d) => {
+      if (d.work_type === 'final_year_project' || d.work_type === 'team_project')
+        return !!d.material_source;
+      return true;
+    },
+    { message: 'Select material source', path: ['material_source'] },
+  )
+  .refine(
+    (d) => {
       if (d.work_type === 'other') return !!d.work_description?.trim();
       return true;
     },
-    { message: 'Description is required when work type is "Other"', path: ['work_description'] },
-  )
-  .refine(
-    (d) => {
-      if (d.work_type === 'academic_event') return !!d.work_description?.trim();
-      return true;
-    },
-    { message: 'Description is required for Academic Event', path: ['work_description'] },
-  )
-  .refine(
-    (d) => {
-      if (d.work_type === 'team_project' || d.work_type === 'final_year_project') return !!d.team_name;
-      return true;
-    },
-    { message: 'Team name is required', path: ['team_name'] },
+    { message: 'Description is required', path: ['work_description'] },
   );
 
 type FormValues = z.infer<typeof utilizationSchema>;
@@ -112,7 +124,7 @@ function computeDuration(start: string, end: string): number | null {
   if (!start || !end) return null;
   const [sh, sm] = start.split(':').map(Number);
   const [eh, em] = end.split(':').map(Number);
-  const mins = (eh * 60 + em) - (sh * 60 + sm);
+  const mins = eh * 60 + em - (sh * 60 + sm);
   return mins > 0 ? mins : null;
 }
 
@@ -124,88 +136,146 @@ function formatDuration(mins: number): string {
   return `${h}h ${m}m`;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+function machineStatusColor(status: Machine['status']) {
+  switch (status) {
+    case 'available':
+      return 'border-emerald-500/40 text-emerald-400';
+    case 'busy':
+    case 'reserved':
+      return 'border-amber-500/40 text-amber-400';
+    case 'maintenance':
+      return 'border-red-500/40 text-red-400';
+    default:
+      return 'border-border text-muted-foreground';
+  }
+}
+
+async function uploadPermissionLetter(file: File, userId: string): Promise<string> {
+  const ext = file.name.split('.').pop() || 'pdf';
+  const path = `permission-letters/${userId}/${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from('uploads').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+  });
+  if (error) throw new Error('File upload failed: ' + error.message);
+  const { data } = supabase.storage.from('uploads').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+// ─── Machine Card ─────────────────────────────────────────────────────────────
+
+function MachineCard({
+  machine,
+  selected,
+  onSelect,
+}: {
+  machine: Machine;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const disabled = machine.status === 'maintenance';
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onSelect}
+      disabled={disabled}
+      className={cn(
+        'text-left p-4 rounded-xl border-2 transition-all duration-200',
+        'bg-muted/20 hover:bg-muted/40',
+        disabled && 'opacity-40 cursor-not-allowed',
+        selected
+          ? 'border-primary ring-2 ring-primary/20 bg-primary/5'
+          : 'border-white/10 hover:border-white/20',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+          <Cpu className="h-4 w-4 text-primary" />
+        </div>
+        <Badge
+          variant="outline"
+          className={cn('text-[10px] capitalize shrink-0', machineStatusColor(machine.status))}
+        >
+          {machine.status}
+        </Badge>
+      </div>
+      <h3 className="text-sm font-semibold leading-tight truncate">{machine.name}</h3>
+      {machine.shop_type && (
+        <p className="text-xs text-muted-foreground mt-0.5 truncate">{machine.shop_type}</p>
+      )}
+    </button>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function UtilizationForm() {
   const { machine_id: urlMachineId } = useParams<{ machine_id: string }>();
   const navigate = useNavigate();
-  const { profile } = useAuthStore();
+  const location = useLocation();
+  const { user, profile } = useAuthStore();
   const { toast } = useToast();
 
-  // Machine selection state — mirrors faculty catalog picker
-  const [selectedCatalog, setSelectedCatalog] = useState<string>('');
-  const [customMachineName, setCustomMachineName] = useState('');
+  // ── Machine selection ───────────────────────────────────────────────
+  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(
+    urlMachineId || null,
+  );
+  const [machineSearch, setMachineSearch] = useState('');
 
-  // SOP interaction tracking
-  const sopContainerRef = useRef<HTMLDivElement>(null);
-  const [sopScrolled, setSopScrolled] = useState(false);
-  const [safetyCheckboxEnabled, setSafetyCheckboxEnabled] = useState(false);
+  // ── Permission letter file ──────────────────────────────────────────
+  const [permissionFile, setPermissionFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Derive the name to look up — catalog name or custom name (on blur)
-  const [committedCustomName, setCommittedCustomName] = useState('');
-  const nameToResolve =
-    selectedCatalog === '__other__'
-      ? committedCustomName
-      : selectedCatalog || '';
+  // ── Safety state ────────────────────────────────────────────────────
+  const [safetyCleared, setSafetyCleared] = useState(false);
+  const [safetyLoading, setSafetyLoading] = useState(false);
 
-  // Resolve catalog / custom name → DB machine (useQuery = auto retry + cache)
-  const {
-    data: resolvedMachine,
-    isLoading: resolving,
-    isError: resolveError,
-  } = useQuery({
-    queryKey: ['machine-by-name', nameToResolve],
-    queryFn: () => getMachineByName(nameToResolve),
-    enabled: !!nameToResolve && !!profile,   // wait for auth
-    retry: 2,
-    staleTime: 30_000,
+  // ── Queries ─────────────────────────────────────────────────────────
+
+  const { data: machines = [], isLoading: machinesLoading } = useQuery({
+    queryKey: ['all-machines'],
+    queryFn: getAllMachines,
+    staleTime: 60_000,
   });
 
-  const resolvedMachineId = resolvedMachine?.id ?? null;
-  const machineNotFound = !resolving && !!nameToResolve && !resolvedMachine && !resolveError;
+  const selectedMachine = machines.find((m) => m.id === selectedMachineId) ?? null;
 
-  const activeMachineId = urlMachineId || resolvedMachineId || undefined;
-
-  // When catalog selection changes
-  const handleCatalogChange = useCallback((value: string) => {
-    setSelectedCatalog(value);
-    setSopScrolled(false);
-    setSafetyCheckboxEnabled(false);
-    if (value !== '__other__') {
-      setCustomMachineName('');
-      setCommittedCustomName('');
-    }
-  }, []);
-
-  // For "Other" custom name — commit on blur so the query fires
-  const handleCustomNameBlur = useCallback(() => {
-    if (customMachineName.trim()) {
-      setCommittedCustomName(customMachineName.trim());
-    }
-  }, [customMachineName]);
-
-  // Queries
-  const { data: machine, isLoading: machineLoading } = useQuery({
-    queryKey: ['machine', activeMachineId],
-    queryFn: () => getMachineById(activeMachineId!),
-    enabled: !!activeMachineId,
+  // If URL has a machine_id, also fetch it directly
+  const { data: urlMachine, isLoading: urlMachineLoading } = useQuery({
+    queryKey: ['machine', urlMachineId],
+    queryFn: () => getMachineById(urlMachineId!),
+    enabled: !!urlMachineId,
   });
 
-  const { data: recentSafety } = useQuery({
-    queryKey: ['recent-safety', activeMachineId],
-    queryFn: () => checkRecentSafetyAcknowledgement(activeMachineId!),
-    enabled: !!activeMachineId,
+  const activeMachine = selectedMachine || (urlMachineId ? urlMachine : null) || null;
+
+  const { data: recentSafety, refetch: refetchSafety } = useQuery({
+    queryKey: ['recent-safety', selectedMachineId],
+    queryFn: () => checkRecentSafetyAcknowledgement(selectedMachineId!),
+    enabled: !!selectedMachineId,
   });
 
-  // If user already acknowledged within 30 days, enable checkbox immediately
+  // Sync safety status with query result
   useEffect(() => {
-    if (recentSafety) {
-      setSafetyCheckboxEnabled(true);
-      setSopScrolled(true);
-    }
+    setSafetyCleared(!!recentSafety);
   }, [recentSafety]);
 
-  // Form
+  // Reset safety when machine changes
+  useEffect(() => {
+    setSafetyCleared(false);
+  }, [selectedMachineId]);
+
+  // Machine search filter
+  const filteredMachines = machineSearch.trim()
+    ? machines.filter(
+        (m) =>
+          m.name.toLowerCase().includes(machineSearch.toLowerCase()) ||
+          m.shop_type?.toLowerCase().includes(machineSearch.toLowerCase()),
+      )
+    : machines;
+
+  // ── Form ────────────────────────────────────────────────────────────
+
   const {
     register,
     handleSubmit,
@@ -215,76 +285,86 @@ export default function UtilizationForm() {
   } = useForm<FormValues>({
     resolver: zodResolver(utilizationSchema),
     defaultValues: {
-      roll_number: profile?.roll_number || '',
-      branch: profile?.branch || '',
-      year: profile?.year || undefined,
-      division: profile?.division || '',
-      batch: profile?.batch || '',
       work_type: undefined,
+      team_name_text: '',
+      team_selection: undefined,
+      material_source: undefined,
       work_description: '',
-      raw_material_source: undefined,
       date: undefined,
       start_time: '',
       end_time: '',
-      safety_acknowledged: undefined,
-      team_name: undefined,
-      team_name_other: '',
-      permission_letter_url: '',
     },
   });
 
-  const workType = watch('work_type');
+  const workType = watch('work_type') as FormWorkType | undefined;
   const startTime = watch('start_time');
   const endTime = watch('end_time');
   const duration = computeDuration(startTime, endTime);
 
-  // SOP scroll handler
-  const handleSopScroll = useCallback(() => {
-    const el = sopContainerRef.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
-    if (atBottom && !sopScrolled) {
-      setSopScrolled(true);
-      setSafetyCheckboxEnabled(true);
-    }
-  }, [sopScrolled]);
+  // ── Safety acknowledgement handler ──────────────────────────────────
 
-  // Submission
+  const handleAcknowledgeSafety = useCallback(async () => {
+    if (!selectedMachineId) return;
+    setSafetyLoading(true);
+    try {
+      await acknowledgeSafety(selectedMachineId);
+      await refetchSafety();
+      setSafetyCleared(true);
+      toast({ title: 'Safety acknowledged', description: 'You can now submit your request.' });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err.message, variant: 'destructive' });
+    } finally {
+      setSafetyLoading(false);
+    }
+  }, [selectedMachineId, refetchSafety, toast]);
+
+  // ── Submission ──────────────────────────────────────────────────────
+
   const submitMutation = useMutation({
     mutationFn: async (values: FormValues) => {
-      if (!activeMachineId) throw new Error('Please select a machine');
-
-      // Redirect first_year_practical to the practical module
-      if (values.work_type === 'first_year_practical') {
-        throw new Error('First Year Practicals must be submitted through the Practical Module by your faculty.');
+      if (!selectedMachineId) throw new Error('Please select a machine');
+      if (!safetyCleared) throw new Error('Please complete safety acknowledgement first');
+      if (values.work_type === 'final_year_project' && !permissionFile) {
+        throw new Error('Please upload a permission letter');
       }
 
-      // Record safety acknowledgement if not recently done
-      if (!recentSafety) {
-        await acknowledgeSafety(activeMachineId);
+      let permissionUrl = '';
+      if (values.work_type === 'final_year_project' && permissionFile) {
+        permissionUrl = await uploadPermissionLetter(permissionFile, user!.id);
       }
+
+      // Derive team_name for DB column
+      const teamName =
+        values.work_type === 'team_project'
+          ? values.team_selection
+          : values.work_type === 'final_year_project'
+            ? values.team_name_text
+            : undefined;
 
       return createUtilizationRequest({
-        machine_id: activeMachineId,
+        machine_id: selectedMachineId,
         work_type: values.work_type,
         work_description: values.work_description,
-        raw_material_source: values.raw_material_source,
+        raw_material_source: values.material_source || 'self_purchased',
         date: format(values.date, 'yyyy-MM-dd'),
         start_time: values.start_time,
         end_time: values.end_time,
         safety_acknowledged: true,
-        roll_number: values.roll_number,
-        branch: values.branch,
-        year: values.year,
-        division: values.division,
-        batch: values.batch,
-        team_name: values.team_name,
-        team_name_other: values.team_name_other,
-        permission_letter_url: values.permission_letter_url,
+        // Identity from profile — NOT from form inputs
+        roll_number: profile?.roll_number || undefined,
+        branch: profile?.branch || undefined,
+        year: profile?.year || undefined,
+        division: profile?.division || undefined,
+        batch: profile?.batch || undefined,
+        team_name: teamName,
+        permission_letter_url: permissionUrl || undefined,
       });
     },
     onSuccess: () => {
-      toast({ title: 'Request submitted!', description: 'Your utilization request is pending supervisor approval.' });
+      toast({
+        title: 'Request submitted!',
+        description: 'Your utilization request is pending approval.',
+      });
       navigate('/dashboard');
     },
     onError: (err: Error) => {
@@ -294,9 +374,9 @@ export default function UtilizationForm() {
 
   const onSubmit = (values: FormValues) => submitMutation.mutate(values);
 
-  // ─── Guards ──────────────────────────────────────────────────────────────────
+  // ─── Guards ─────────────────────────────────────────────────────────
 
-  if (urlMachineId && machineLoading) {
+  if (urlMachineId && urlMachineLoading) {
     return (
       <div className="min-h-screen pt-20 flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -304,7 +384,7 @@ export default function UtilizationForm() {
     );
   }
 
-  if (urlMachineId && !machine) {
+  if (urlMachineId && !urlMachine && !urlMachineLoading) {
     return (
       <div className="min-h-screen pt-20 flex flex-col items-center justify-center gap-4">
         <AlertTriangle className="h-12 w-12 text-destructive" />
@@ -316,23 +396,34 @@ export default function UtilizationForm() {
     );
   }
 
-  // Profile completeness check
-  const profileIncomplete = !profile?.full_name || !profile?.email;
-  if (profileIncomplete) {
+  // Profile completeness gate → redirect to profile page
+  if (!isProfileComplete(profile)) {
     return (
       <div className="min-h-screen pt-20 flex flex-col items-center justify-center gap-4 px-4">
-        <Info className="h-12 w-12 text-warning" />
-        <p className="text-lg font-medium text-center">Please complete your profile before submitting a utilization request.</p>
-        <Button asChild>
-          <Link to="/dashboard">Go to Dashboard</Link>
+        <Info className="h-12 w-12 text-primary" />
+        <p className="text-lg font-medium text-center">Complete your profile first</p>
+        <p className="text-sm text-muted-foreground text-center max-w-md">
+          Your roll number, branch, year and other details are required before submitting a
+          utilization request.
+        </p>
+        <Button onClick={() => navigate('/profile', { state: { returnTo: location.pathname } })}>
+          Complete Profile
         </Button>
       </div>
     );
   }
 
+  // ─── Render ─────────────────────────────────────────────────────────
+
+  const canSubmit =
+    !!selectedMachineId &&
+    safetyCleared &&
+    !submitMutation.isPending &&
+    activeMachine?.status !== 'maintenance';
+
   return (
     <div className="min-h-screen pt-20 pb-24">
-      <div className="container max-w-2xl">
+      <div className="container max-w-3xl">
         {/* Header */}
         <div className="mb-8">
           <Button variant="ghost" size="sm" asChild className="mb-4">
@@ -343,182 +434,88 @@ export default function UtilizationForm() {
           </Button>
           <h1 className="text-2xl font-bold mb-1">Machine Utilization Request</h1>
           <p className="text-sm text-muted-foreground">
-            Fill in the details below to request machine time.
+            Select a machine, fill in work details, and submit your request.
           </p>
         </div>
 
-        {/* Machine Selection / Info */}
-        <section className="glass-panel rounded-xl p-5 mb-6">
-          {!urlMachineId ? (
-            <>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Cpu className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h2 className="text-base font-semibold">Select Machine *</h2>
-                  <p className="text-xs text-muted-foreground">Choose the machine you want to use</p>
-                </div>
-              </div>
-              <Select value={selectedCatalog} onValueChange={handleCatalogChange}>
-                <SelectTrigger aria-label="Select machine">
-                  <SelectValue placeholder="Pick a machine" />
-                </SelectTrigger>
-                <SelectContent className="z-[70]">
-                  {MACHINE_CATALOG.map((name) => (
-                    <SelectItem key={name} value={name}>{name}</SelectItem>
-                  ))}
-                  <SelectItem value="__other__">Other (custom name)</SelectItem>
-                </SelectContent>
-              </Select>
-              {selectedCatalog === '__other__' && (
-                <Input
-                  value={customMachineName}
-                  onChange={(e) => setCustomMachineName(e.target.value)}
-                  onBlur={handleCustomNameBlur}
-                  placeholder="Enter custom machine name"
-                  className="mt-2"
-                />
-              )}
-              {resolving && (
-                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" /> Looking up machine...
-                </div>
-              )}
-              {machineNotFound && !resolving && (
-                <div className="mt-2 flex items-center gap-2 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-xs text-destructive">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                  This machine hasn't been added by a faculty member yet. Ask your supervisor to add it first.
-                </div>
-              )}
-              {machine && !resolving && (
-                <div className="mt-3 p-3 rounded-lg bg-muted/20 border border-border/20">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{machine.name}</span>
-                    <Badge variant="outline" className="text-xs">{machine.status}</Badge>
-                  </div>
-                  {machine.description && (
-                    <p className="text-xs text-muted-foreground mt-1">{machine.description}</p>
-                  )}
-                  {!machine.supervisor_id && (
-                    <div className="mt-2 flex items-center gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/30 text-xs text-yellow-400">
-                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      No faculty assigned to this machine. Your request may take longer to be reviewed.
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
+        {/* ═══ Section 1: Machine Grid ═══ */}
+        <section className="mb-6">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h2 className="text-base font-semibold shrink-0">Select Machine</h2>
+            <div className="relative w-52">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={machineSearch}
+                onChange={(e) => setMachineSearch(e.target.value)}
+                placeholder="Search machines…"
+                className="pl-8 h-8 text-xs"
+              />
+            </div>
+          </div>
+
+          {machinesLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : filteredMachines.length === 0 ? (
+            <div className="text-center py-12 text-sm text-muted-foreground">
+              {machineSearch ? 'No machines match your search.' : 'No machines available.'}
+            </div>
           ) : (
-            <>
-              <div className="flex items-center gap-3 mb-3">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Cpu className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h2 className="text-base font-semibold">{machine!.name}</h2>
-                  {machine!.shop_type && (
-                    <p className="text-xs text-muted-foreground">{machine!.shop_type}</p>
-                  )}
-                </div>
-                <Badge variant="outline" className="ml-auto text-xs">
-                  {machine!.status}
-                </Badge>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {filteredMachines.map((m) => (
+                <MachineCard
+                  key={m.id}
+                  machine={m}
+                  selected={selectedMachineId === m.id}
+                  onSelect={() => setSelectedMachineId(m.id)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Selected machine info banner */}
+          {activeMachine && (
+            <div className="mt-4 p-3 rounded-lg bg-primary/5 border border-primary/10 flex items-center gap-3">
+              <Cpu className="h-5 w-5 text-primary shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium">{activeMachine.name}</span>
+                {activeMachine.shop_type && (
+                  <span className="text-xs text-muted-foreground ml-2">
+                    {activeMachine.shop_type}
+                  </span>
+                )}
               </div>
-              {machine!.description && (
-                <p className="text-sm text-muted-foreground">{machine!.description}</p>
-              )}
-            </>
+              <Badge
+                variant="outline"
+                className={cn('text-xs capitalize', machineStatusColor(activeMachine.status))}
+              >
+                {activeMachine.status}
+              </Badge>
+            </div>
           )}
         </section>
 
-        {/* Student Information */}
-        <section className="glass-panel rounded-xl p-5 mb-6">
-          <h3 className="text-sm font-medium text-muted-foreground mb-3">Student Information</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <ReadOnlyField label="Name" value={profile!.full_name} />
-            <ReadOnlyField label="Email" value={profile!.email} />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-            <div>
-              <Label htmlFor="roll_number">Roll Number *</Label>
-              <Input id="roll_number" {...register('roll_number')} className="mt-1.5" placeholder="e.g. 22CO101" />
-              {errors.roll_number && <p className="text-xs text-destructive mt-1">{errors.roll_number.message}</p>}
-            </div>
-            <div>
-              <Label htmlFor="branch">Branch *</Label>
-              <Controller
-                name="branch"
-                control={control}
-                render={({ field }) => (
-                  <Select onValueChange={field.onChange} value={field.value ?? ''}>
-                    <SelectTrigger id="branch" className="mt-1.5" aria-label="Branch">
-                      <SelectValue placeholder="Select branch" />
-                    </SelectTrigger>
-                    <SelectContent className="z-[70]">
-                      {(Object.keys(BRANCH_LABELS) as StudentBranch[]).map((key) => (
-                        <SelectItem key={key} value={key}>{BRANCH_LABELS[key]}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {errors.branch && <p className="text-xs text-destructive mt-1">{errors.branch.message}</p>}
-            </div>
-            <div>
-              <Label htmlFor="year">Year *</Label>
-              <Controller
-                name="year"
-                control={control}
-                render={({ field }) => (
-                  <Select onValueChange={(v) => field.onChange(Number(v))} value={field.value?.toString() ?? ''}>
-                    <SelectTrigger id="year" className="mt-1.5" aria-label="Year">
-                      <SelectValue placeholder="Select year" />
-                    </SelectTrigger>
-                    <SelectContent className="z-[70]">
-                      {[1, 2, 3, 4].map((y) => (
-                        <SelectItem key={y} value={y.toString()}>Year {y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-              {errors.year && <p className="text-xs text-destructive mt-1">{errors.year.message}</p>}
-            </div>
-            <div>
-              <Label htmlFor="division">Division *</Label>
-              <Input id="division" {...register('division')} className="mt-1.5" placeholder="e.g. A" />
-              {errors.division && <p className="text-xs text-destructive mt-1">{errors.division.message}</p>}
-            </div>
-            <div>
-              <Label htmlFor="batch">Batch *</Label>
-              <Input id="batch" {...register('batch')} className="mt-1.5" placeholder="e.g. B1" />
-              {errors.batch && <p className="text-xs text-destructive mt-1">{errors.batch.message}</p>}
-            </div>
-          </div>
-        </section>
-
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          {/* Work Details */}
+          {/* ═══ Section 2: Work Type ═══ */}
           <section className="glass-panel rounded-xl p-5">
             <h3 className="text-sm font-medium text-muted-foreground mb-4">Work Details</h3>
 
             <div className="space-y-4">
-              {/* Work Type */}
               <div>
                 <Label htmlFor="work_type">Work Type *</Label>
                 <Controller
                   name="work_type"
                   control={control}
                   render={({ field }) => (
-                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                    <Select onValueChange={field.onChange} value={field.value ?? ''}>
                       <SelectTrigger id="work_type" className="mt-1.5" aria-label="Work type">
                         <SelectValue placeholder="Select work type" />
                       </SelectTrigger>
                       <SelectContent className="z-[70]">
-                        {(Object.keys(WORK_TYPE_LABELS) as WorkType[]).map((key) => (
-                          <SelectItem key={key} value={key}>
-                            {WORK_TYPE_LABELS[key]}
+                        {WORK_TYPE_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -530,114 +527,166 @@ export default function UtilizationForm() {
                 )}
               </div>
 
-              {/* First Year Practical redirect notice */}
-              {workType === 'first_year_practical' && (
-                <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                  <p className="text-sm text-blue-400 font-medium mb-1">First Year Practical</p>
-                  <p className="text-xs text-muted-foreground mb-2">
-                    First year practical sessions are managed by faculty through the Practical Module.
-                    Contact your faculty to create a session, then mark attendance there.
-                  </p>
-                  <Button size="sm" variant="outline" asChild>
-                    <Link to="/dashboard">Go to Dashboard</Link>
-                  </Button>
-                </div>
-              )}
+              {/* ═══ Section 3: Conditional Fields ═══ */}
 
-              {/* Team Name (for team_project / final_year_project) */}
-              {(workType === 'team_project' || workType === 'final_year_project') && (
-                <>
+              {/* Final Year Project fields */}
+              {workType === 'final_year_project' && (
+                <div className="space-y-4 p-4 rounded-lg bg-muted/10 border border-white/5 fade-in">
                   <div>
-                    <Label htmlFor="team_name">Team Name *</Label>
+                    <Label htmlFor="team_name_text">Team / Project Name *</Label>
+                    <Input
+                      id="team_name_text"
+                      {...register('team_name_text')}
+                      className="mt-1.5"
+                      placeholder="Enter your team or project name"
+                    />
+                    {errors.team_name_text && (
+                      <p className="text-xs text-destructive mt-1">
+                        {errors.team_name_text.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label>Permission Letter *</Label>
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className={cn(
+                        'mt-1.5 flex items-center gap-3 p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors',
+                        permissionFile
+                          ? 'border-emerald-500/30 bg-emerald-500/5'
+                          : 'border-white/10 hover:border-white/20 bg-muted/10',
+                      )}
+                    >
+                      <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm truncate">
+                        {permissionFile ? permissionFile.name : 'Click to upload permission letter'}
+                      </span>
+                    </div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      className="hidden"
+                      onChange={(e) => setPermissionFile(e.target.files?.[0] || null)}
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      PDF, Word, or image formats accepted
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label>Material Source *</Label>
                     <Controller
-                      name="team_name"
+                      name="material_source"
                       control={control}
                       render={({ field }) => (
                         <Select onValueChange={field.onChange} value={field.value ?? ''}>
-                          <SelectTrigger id="team_name" className="mt-1.5" aria-label="Team name">
-                            <SelectValue placeholder="Select team" />
+                          <SelectTrigger className="mt-1.5" aria-label="Material source">
+                            <SelectValue placeholder="Select source" />
                           </SelectTrigger>
                           <SelectContent className="z-[70]">
-                            {(Object.keys(TEAM_LABELS) as TeamName[]).map((key) => (
-                              <SelectItem key={key} value={key}>{TEAM_LABELS[key]}</SelectItem>
+                            {MATERIAL_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                       )}
                     />
-                    {errors.team_name && <p className="text-xs text-destructive mt-1">{errors.team_name.message}</p>}
+                    {errors.material_source && (
+                      <p className="text-xs text-destructive mt-1">
+                        {errors.material_source.message}
+                      </p>
+                    )}
                   </div>
-                  {watch('team_name') === 'other' && (
-                    <div>
-                      <Label htmlFor="team_name_other">Other Team Name</Label>
-                      <Input id="team_name_other" {...register('team_name_other')} className="mt-1.5" placeholder="Enter team name" />
-                    </div>
-                  )}
-                </>
-              )}
-
-              {/* Permission Letter (for final_year_project) */}
-              {workType === 'final_year_project' && (
-                <div>
-                  <Label htmlFor="permission_letter_url">Permission Letter URL</Label>
-                  <Input
-                    id="permission_letter_url"
-                    {...register('permission_letter_url')}
-                    className="mt-1.5"
-                    placeholder="Paste a link to the uploaded permission letter"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">Upload to Google Drive or similar and paste the share link</p>
                 </div>
               )}
 
-              {/* Work Description (shown for "other", "academic_event", or optionally) */}
-              {(workType === 'other' || workType === 'academic_event') && (
-                <div>
-                  <Label htmlFor="work_description">Work Description *</Label>
+              {/* Team Project fields */}
+              {workType === 'team_project' && (
+                <div className="space-y-4 p-4 rounded-lg bg-muted/10 border border-white/5 fade-in">
+                  <div>
+                    <Label htmlFor="team_selection">Team *</Label>
+                    <Controller
+                      name="team_selection"
+                      control={control}
+                      render={({ field }) => (
+                        <Select onValueChange={field.onChange} value={field.value ?? ''}>
+                          <SelectTrigger id="team_selection" className="mt-1.5" aria-label="Team">
+                            <SelectValue placeholder="Select team" />
+                          </SelectTrigger>
+                          <SelectContent className="z-[70]">
+                            {(Object.keys(TEAM_LABELS) as TeamName[]).map((key) => (
+                              <SelectItem key={key} value={key}>
+                                {TEAM_LABELS[key]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    {errors.team_selection && (
+                      <p className="text-xs text-destructive mt-1">
+                        {errors.team_selection.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <Label>Material Source *</Label>
+                    <Controller
+                      name="material_source"
+                      control={control}
+                      render={({ field }) => (
+                        <Select onValueChange={field.onChange} value={field.value ?? ''}>
+                          <SelectTrigger className="mt-1.5" aria-label="Material source">
+                            <SelectValue placeholder="Select source" />
+                          </SelectTrigger>
+                          <SelectContent className="z-[70]">
+                            {MATERIAL_OPTIONS.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    {errors.material_source && (
+                      <p className="text-xs text-destructive mt-1">
+                        {errors.material_source.message}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Other — description */}
+              {workType === 'other' && (
+                <div className="p-4 rounded-lg bg-muted/10 border border-white/5 fade-in">
+                  <Label htmlFor="work_description">Description *</Label>
                   <Textarea
                     id="work_description"
                     {...register('work_description')}
-                    placeholder="Describe the work you'll be performing..."
+                    placeholder="Describe the work you'll be performing…"
                     className="mt-1.5"
                     rows={3}
                   />
                   {errors.work_description && (
-                    <p className="text-xs text-destructive mt-1">{errors.work_description.message}</p>
+                    <p className="text-xs text-destructive mt-1">
+                      {errors.work_description.message}
+                    </p>
                   )}
                 </div>
               )}
-
-              {/* Raw Material Source */}
-              <div>
-                <Label htmlFor="raw_material_source">Raw Material Source *</Label>
-                <Controller
-                  name="raw_material_source"
-                  control={control}
-                  render={({ field }) => (
-                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                      <SelectTrigger id="raw_material_source" className="mt-1.5" aria-label="Raw material source">
-                        <SelectValue placeholder="Select material source" />
-                      </SelectTrigger>
-                      <SelectContent className="z-[70]">
-                        {(Object.keys(RAW_MATERIAL_LABELS) as RawMaterialSource[]).map((key) => (
-                          <SelectItem key={key} value={key}>
-                            {RAW_MATERIAL_LABELS[key]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                {errors.raw_material_source && (
-                  <p className="text-xs text-destructive mt-1">{errors.raw_material_source.message}</p>
-                )}
-              </div>
             </div>
           </section>
 
-          {/* Schedule */}
+          {/* ═══ Section 4: Time Slot ═══ */}
           <section className="glass-panel rounded-xl p-5">
-            <h3 className="text-sm font-medium text-muted-foreground mb-4">Estimated Usage</h3>
+            <h3 className="text-sm font-medium text-muted-foreground mb-4">Time Slot</h3>
 
             <div className="space-y-4">
               {/* Date */}
@@ -671,7 +720,9 @@ export default function UtilizationForm() {
                               field.onChange(day);
                               setCalOpen(false);
                             }}
-                            disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                            disabled={(date) =>
+                              date < new Date(new Date().setHours(0, 0, 0, 0))
+                            }
                             initialFocus
                           />
                         </PopoverContent>
@@ -684,7 +735,7 @@ export default function UtilizationForm() {
                 )}
               </div>
 
-              {/* Time */}
+              {/* Start / End Time */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="start_time">Start Time *</Label>
@@ -725,161 +776,108 @@ export default function UtilizationForm() {
             </div>
           </section>
 
-          {/* Safety Section */}
+          {/* ═══ Section 5: Safety Status Box ═══ */}
           <section className="glass-panel rounded-xl p-5">
             <h3 className="text-sm font-medium text-muted-foreground mb-4 flex items-center gap-2">
-              <Shield className="h-4 w-4" /> Safety Compliance
+              <Shield className="h-4 w-4" /> Safety Clearance
             </h3>
 
-            {recentSafety ? (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 mb-4">
-                <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0" />
+            {!selectedMachineId ? (
+              <p className="text-xs text-muted-foreground text-center py-4">
+                Select a machine above to check safety status.
+              </p>
+            ) : safetyCleared ? (
+              /* ── Green: Safety valid ── */
+              <div className="flex items-center gap-3 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                <CheckCircle2 className="h-6 w-6 text-emerald-400 shrink-0" />
                 <div>
-                  <p className="text-sm font-medium text-emerald-400">Safety Previously Acknowledged</p>
+                  <p className="text-sm font-semibold text-emerald-400">Safety Clearance Valid</p>
                   <p className="text-xs text-muted-foreground">
-                    You acknowledged safety within the last 30 days.
+                    Your safety acknowledgement is active. You may submit your request.
                   </p>
                 </div>
               </div>
             ) : (
-              <>
-                {/* SOP container — user must scroll through */}
-                {machine?.sop_pdf_url ? (
-                  <div className="mb-4">
-                    <p className="text-xs text-muted-foreground mb-2">
-                      Please review the Standard Operating Procedure below. Scroll to the bottom to enable the safety checkbox.
+              /* ── Red: Safety expired / not done ── */
+              <div className="space-y-4">
+                <div className="flex items-center gap-3 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <AlertTriangle className="h-6 w-6 text-red-400 shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-400">Safety Clearance Required</p>
+                    <p className="text-xs text-muted-foreground">
+                      You must complete the safety module for this machine before submitting.
                     </p>
-                    <div
-                      ref={sopContainerRef}
-                      onScroll={handleSopScroll}
-                      className="h-52 overflow-y-auto rounded-lg border border-white/10 bg-muted/20 p-1"
-                    >
-                      <iframe
-                        src={machine!.sop_pdf_url!}
-                        title="SOP Document"
-                        className="w-full h-[600px] rounded"
-                      />
-                    </div>
+                  </div>
+                </div>
+
+                {/* Audio player if machine has audio */}
+                {activeMachine?.audio_explanation_url ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Listen to the complete safety audio below. You cannot skip or fast-forward.
+                    </p>
+                    <SafetyAudioPlayer
+                      module={{
+                        id: `machine-${activeMachine.id}`,
+                        title: `${activeMachine.name} Safety`,
+                        safety_type: 'machine',
+                        resource_id: null,
+                        shop_name: activeMachine.shop_type,
+                        audio_url: activeMachine.audio_explanation_url,
+                        audio_duration_seconds: 0,
+                        validity_days: 30,
+                        active: true,
+                        created_at: '',
+                        updated_at: '',
+                      }}
+                      onAcknowledged={handleAcknowledgeSafety}
+                    />
                   </div>
                 ) : (
-                  <div className="mb-4">
-                    <p className="text-xs text-muted-foreground mb-2">
-                      Review the safety checklist below before proceeding.
+                  /* Fallback: simple acknowledge button */
+                  <div className="text-center">
+                    <p className="text-xs text-muted-foreground mb-3">
+                      By clicking below you confirm you have read and understood all safety
+                      guidelines and SOPs for this machine.
                     </p>
-                    <div
-                      ref={sopContainerRef}
-                      onScroll={handleSopScroll}
-                      className="h-52 overflow-y-auto rounded-lg border border-white/10 bg-muted/20 p-4 space-y-3"
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleAcknowledgeSafety}
+                      disabled={safetyLoading}
                     >
-                      <h4 className="text-sm font-semibold flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-primary" /> Safety Checklist
-                      </h4>
-                      <ul className="space-y-2 text-sm text-muted-foreground">
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">1.</span>
-                          Wear appropriate PPE (safety goggles, gloves, ear protection) at all times.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">2.</span>
-                          Ensure the machine is properly set up and all guards are in place.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">3.</span>
-                          Never operate the machine without supervisor approval.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">4.</span>
-                          Keep the work area clean and free from obstructions.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">5.</span>
-                          Know the location of emergency stop buttons and fire extinguishers.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">6.</span>
-                          Report any machine malfunction immediately to your supervisor.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">7.</span>
-                          Do not use the machine if you are feeling unwell, fatigued, or under medication.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">8.</span>
-                          Follow the Standard Operating Procedure (SOP) for this specific machine.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">9.</span>
-                          Secure all loose clothing, hair, and jewelry before operating rotating equipment.
-                        </li>
-                        <li className="flex items-start gap-2">
-                          <span className="text-primary font-bold mt-0.5">10.</span>
-                          After use, power down the machine and clean the work area thoroughly.
-                        </li>
-                      </ul>
-                      <Separator className="bg-white/10" />
-                      <p className="text-xs text-muted-foreground italic">
-                        End of safety checklist. You may now acknowledge below.
-                      </p>
-                    </div>
-                    {!sopScrolled && (
-                      <p className="text-xs text-amber-400 mt-1.5 flex items-center gap-1">
-                        <AlertTriangle className="h-3 w-3" />
-                        Scroll to the bottom to enable the safety checkbox.
-                      </p>
-                    )}
+                      {safetyLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Acknowledging…
+                        </>
+                      ) : (
+                        <>
+                          <Shield className="h-4 w-4 mr-2" /> Acknowledge Safety
+                        </>
+                      )}
+                    </Button>
                   </div>
                 )}
-              </>
-            )}
-
-            <Controller
-              name="safety_acknowledged"
-              control={control}
-              render={({ field }) => (
-                <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/30 border border-white/5">
-                  <Checkbox
-                    id="safety_acknowledged"
-                    checked={field.value === true}
-                    onCheckedChange={(checked) => field.onChange(checked === true ? true : undefined)}
-                    disabled={!safetyCheckboxEnabled}
-                    aria-label="I have read and understood safety rules"
-                  />
-                  <label
-                    htmlFor="safety_acknowledged"
-                    className={cn(
-                      'text-xs leading-relaxed cursor-pointer',
-                      !safetyCheckboxEnabled && 'opacity-50',
-                    )}
-                  >
-                    I have read and understood the safety rules, SOP, and guidelines for this machine.
-                    I agree to follow all safety procedures during operation.
-                  </label>
-                </div>
-              )}
-            />
-            {errors.safety_acknowledged && (
-              <p className="text-xs text-destructive mt-1">{errors.safety_acknowledged.message}</p>
+              </div>
             )}
           </section>
 
-          {/* Sticky submit bar */}
+          {/* ═══ Submit ═══ */}
           <div className="fixed bottom-0 left-0 right-0 z-30 glass-panel-strong border-t border-white/10 p-4 md:static md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
-            <div className="container max-w-2xl flex items-center justify-between gap-4">
+            <div className="container max-w-3xl flex items-center justify-between gap-4">
               <div className="hidden md:block text-xs text-muted-foreground">
-                {duration && machine
-                  ? `${formatDuration(duration)} on ${machine.name}`
-                  : 'Complete all fields to submit'}
+                {duration && activeMachine
+                  ? `${formatDuration(duration)} on ${activeMachine.name}`
+                  : !selectedMachineId
+                    ? 'Select a machine to begin'
+                    : !safetyCleared
+                      ? 'Complete safety clearance to submit'
+                      : 'Complete all fields to submit'}
               </div>
-              <Button
-                type="submit"
-                size="lg"
-                className="w-full md:w-auto"
-                disabled={submitMutation.isPending || !activeMachineId}
-              >
+              <Button type="submit" size="lg" className="w-full md:w-auto" disabled={!canSubmit}>
                 {submitMutation.isPending ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Submitting...
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Submitting…
                   </>
                 ) : (
                   'Submit Utilization Request'
@@ -889,17 +887,6 @@ export default function UtilizationForm() {
           </div>
         </form>
       </div>
-    </div>
-  );
-}
-
-// ─── Read-only field ──────────────────────────────────────────────────────────
-
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="p-2.5 rounded-lg bg-muted/30 border border-white/5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-sm font-medium truncate">{value}</p>
     </div>
   );
 }
